@@ -1,0 +1,115 @@
+// CleverHans envelope, reference gRPC binding (spec §6, §11).
+//
+// This proto defines the envelope ONLY — never actions. `action_id` is a
+// plain string and params/slots are generic structs, which is what lets the
+// registry evolve without proto changes. Evolution is additive-only within a
+// major version (spec §13).
+syntax = "proto3";
+
+package cleverhans.v1;
+
+import "google/protobuf/struct.proto";
+
+// One authenticated bidirectional stream per session (spec §6.1). The
+// principal comes from transport metadata, never from envelope payload.
+service AgentService {
+  rpc Stream(stream ClientEvent) returns (stream ServerEvent);
+}
+
+// App-defined context snapshot (spec §6.2). Reference shape; apps extend via
+// `extensions`.
+message Context {
+  string route = 1;
+  google.protobuf.Struct params = 2;
+  optional string selected_record_id = 3;
+  optional string view_type = 4;
+  google.protobuf.Struct extensions = 5;
+}
+
+// App frontend -> agent (spec §6.2).
+message ClientEvent {
+  oneof event {
+    Init init = 1;
+    ContextUpdate context_update = 2;
+    UserMessage user_message = 3;
+    ConfirmAction confirm_action = 4;
+    RejectAction reject_action = 5;
+  }
+}
+
+// Must be the first message on a stream.
+message Init {
+  string spec_version = 1;
+  Context context = 2;
+}
+
+message ContextUpdate {
+  Context context = 1;
+  uint64 context_seq = 2;
+}
+
+message UserMessage {
+  string text = 1;
+  string client_msg_id = 2;
+}
+
+message ConfirmAction {
+  string proposal_id = 1;
+}
+
+message RejectAction {
+  string proposal_id = 1;
+  optional string reason = 2;
+}
+
+// Agent -> app frontend (spec §6.3).
+message ServerEvent {
+  oneof event {
+    ChatMessage chat_message = 1;
+    ActionProposal action_proposal = 2;
+    ProposalStateChanged proposal_state_changed = 3;
+    Error error = 4;
+  }
+}
+
+message ChatMessage {
+  string msg_id = 1;
+  string text = 2;
+  bool done = 3;
+}
+
+// Permission-correct preview of a mutating action (spec §6.4).
+message DryRunPreview {
+  uint64 affected_count = 1;
+  repeated string sample_ids = 2;
+  optional string summary = 3;
+  google.protobuf.Struct extensions = 4;
+}
+
+// A validated proposal, ready to render (spec §6.4).
+message ActionProposal {
+  string proposal_id = 1;
+  string action_id = 2;
+  google.protobuf.Struct params = 3;
+  string block_type = 4;
+  google.protobuf.Struct slots = 5;
+  optional DryRunPreview preview = 6;
+  uint64 context_seq = 7;
+  optional string turn_msg_id = 8;
+}
+
+// Lifecycle transition after emission (spec §7). `state` is one of the spec
+// state names: "validated", "confirmed", "executed", "rejected", "expired",
+// "failed". A string, not an enum, so envelope evolution stays additive.
+message ProposalStateChanged {
+  string proposal_id = 1;
+  string state = 2;
+  optional string reason = 3;
+  optional google.protobuf.Value result = 4;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  bool recoverable = 3;
+}
