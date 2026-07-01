@@ -213,6 +213,18 @@ impl<P> Registry<P> {
         self.blocks.get(block_type)
     }
 
+    /// All registered action definitions, in deterministic (ID) order.
+    /// Wire-visible metadata only — handlers stay private. This is the
+    /// codegen input (spec §9: one source, three consumers).
+    pub fn action_defs(&self) -> impl Iterator<Item = &ActionDef> {
+        self.actions.values().map(|reg| &reg.def)
+    }
+
+    /// All registered block definitions, in deterministic order.
+    pub fn block_defs(&self) -> impl Iterator<Item = &BlockDef> {
+        self.blocks.values()
+    }
+
     /// The registry as model-facing tool definitions. Only utterance-sourced
     /// params are exposed — the model never sees context-sourced ones
     /// (spec §4.1).

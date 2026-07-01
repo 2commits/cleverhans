@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/cleverhans-core", "crates/cleverhans-grpc"]
+members = [
+    "crates/cleverhans-codegen",
+    "crates/cleverhans-core",
+    "crates/cleverhans-grpc",
+]
 resolver = "3"
 
 [workspace.package]
