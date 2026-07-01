@@ -304,6 +304,11 @@ slot values; the *vocabulary* is fixed, which is what keeps rendered UI auditabl
 - Slot values MUST validate against the block's slot schema at propose-time (§7.1).
   Frontends MUST refuse to render unregistered block types (defense in depth; such a
   proposal should have been `invalid`).
+- **Slot content SHOULD come from app code, not model output.** The reference
+  implementation sources slot values from an app-registered slot builder (§9.7): the
+  model contributes intent and utterance params only, so even the rendered *text* of a
+  proposal is app-authored. An implementation MAY let the model author slot values, but
+  they MUST still pass the slot schema before render.
 
 The framework MAY ship an optional batteries-included block pack (confirm, diff,
 bulk-preview, form) as a **separate package** — never a core dependency.
@@ -370,6 +375,18 @@ writes context-sourced params.
 One frontend component per registered block type, receiving typed slots. Registered with
 the block router; otherwise plain app code.
 
+### 9.7 Slot builders
+
+```
+build_slots(params: ValidatedParams, preview: DryRunPreview?) -> Slots
+```
+
+Backend-side, per action, optional (absent → empty slots). Turns validated params and
+the dry-run preview into the slot values for the action's block type. Runs inside
+propose-time validation, before the slot schema check (§7.1 step 4), so its output is
+schema-validated like any other slot source. Keeping slot content app-authored closes
+the last generative surface in the rendered UI (§8): the model selects, the app phrases.
+
 ## 10. Deployment topology and auth chain
 
 Reference topology: the agent runs **in-backend** — a crate/module inside the app
@@ -399,6 +416,20 @@ faithful encoding of every envelope message.
 `action_id` as a plain string, `params`/`slots` as generic structures
 (`google.protobuf.Struct`, or per-action messages if stringly-typed maps bite). The
 proto never enumerates actions; the registry evolves without proto changes.
+
+**Lifecycle state is a string on the wire, not a proto enum.** `ProposalStateChanged.state`
+carries the §7 state name (`"executed"`, `"expired"`, …) as a plain string, deliberately:
+
+- The state set is already normative in §7 — a wire enum would duplicate the source of
+  truth without adding safety the validation pipeline doesn't provide.
+- Proto3 decodes an unrecognized enum value to `0`/`UNSPECIFIED`, so adding a state
+  would make old clients silently *misread* new states. An unknown string degrades
+  readably instead, keeping envelope evolution additive (§13).
+- Strings keep every binding (JSON-RPC, tRPC, …) identical on this field instead of
+  each inventing its own enum mapping.
+
+Frontends MUST treat an unrecognized state as terminal and act on it no further —
+fail closed, render nothing new.
 
 Other conforming bindings (WebSocket + JSON-RPC, tRPC, SSE + POST upstream) are
 explicitly welcome. MCP is intentionally **not** the in-app transport — it earns its
