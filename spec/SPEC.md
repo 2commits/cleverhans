@@ -1,0 +1,461 @@
+# CleverHans Protocol Specification
+
+**Version:** 0.1.0-draft
+**Status:** Draft
+**Tracking:** ED-536
+
+A propose-only, in-app, human-in-the-loop (HITL) agent protocol. This document is the
+foundational artifact of the framework: it defines the **proposal envelope**, the
+**proposal lifecycle**, and the **seam interfaces** an application implements to host an
+agent. It is language- and transport-agnostic; reference implementations (Rust backend,
+TypeScript frontend, gRPC binding) conform to this spec but do not define it.
+
+---
+
+## 1. Core thesis
+
+> The agent **never acts on the system**. It proposes actions (and dynamic UI) against an
+> application that already knows its own state; the application executes through its own
+> normal authorized path. The user is the executor.
+
+Every rule in this spec derives from that sentence. Two orthogonal safety gates hold at
+all times:
+
+1. **Closed vocabulary** — the agent can only *reference* actions and UI block types that
+   the application has registered. It has no generative surface into either.
+2. **Naming is not firing** — referencing an action produces a *proposal*. Nothing
+   executes until the user confirms, and execution runs under the user's own credentials
+   through the application's own authorization path.
+
+The agent holds no write credentials. Its only secret is an LLM provider key. It cannot
+escalate beyond what the user could do by hand, because it never does anything by hand.
+
+## 2. Roles and terminology
+
+| Term | Meaning |
+|---|---|
+| **App** | The host application: its frontend, backend, data, and authorization model. |
+| **Agent** | The framework component that talks to an LLM and emits proposals. Runs in-process with the app backend in the reference topology (§10). |
+| **User / Principal** | The authenticated human. All authorization and execution happen as this principal. |
+| **Action** | A named, registered operation the app can perform. Identified by an inert action ID. |
+| **Action registry** | The closed enumeration of actions; the shared contract between app and agent (§4). |
+| **Proposal** | An envelope message in which the agent references one action with filled parameters, for the user to confirm or reject. |
+| **Block type** | A registered UI component identifier. The agent selects a block type and fills its slots; it never generates markup (§8). |
+| **Envelope** | The transport-agnostic message set defined in §6. The envelope is the stable artifact; actions and blocks evolve independently of it. |
+| **Seam** | An interface the app implements to plug into the framework (§9). |
+
+Requirement keywords **MUST**, **MUST NOT**, **SHOULD**, **MAY** follow RFC 2119.
+
+## 3. Action IDs
+
+- An action ID is an **inert, hand-authored, opaque key** — e.g.
+  `transaction.coBuyer.remove`. Dotted-path naming is a readability convention only.
+- The ID is a **key, not a description**. It carries no route, no function path, no
+  encoded semantics. This is what keeps frontend and backend decoupled: each side keeps
+  its own private mapping off the ID, and that mapping never appears in the contract.
+  - Frontend (private): `id → route / component`
+  - Backend (private): `id → handler + real authorization + real queries`
+- The action set is a **closed enumeration owned by the app**. The agent MAY reference a
+  registered ID; it MUST NOT synthesize one. Any proposal naming an unregistered ID is
+  invalid at validation (§7) and MUST NOT be rendered.
+- Learned or information-bearing ID schemes (e.g. RQ-VAE-style semantic codes) are
+  **explicitly rejected** for the action path: a synthesizable ID is a security liability
+  in compliance settings. Embedding/vector techniques MAY be used only as a *retrieval
+  pre-filter* over registry descriptions (top-k shortlisting for large registries, §5);
+  they never resolve an action.
+
+## 4. Action registry — the shared contract
+
+The registry is the single source of truth both sides reference; neither side owns the
+other. In the reference implementation it is defined once in Rust (where authorization
+and schemas live) and TypeScript types are generated from it — one source, three
+consumers: backend resolver, frontend router, agent tool list.
+
+Each registry entry carries:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `id` | string | Inert key (§3). The seam. |
+| `description` | string | What the model matches user intent against. **Load-bearing**: this is the tuning and evaluation surface, especially for weaker/local models. |
+| `params` | param schema | Typed parameter schema. Every param is tagged with a `source` (§4.1). |
+| `block_type` | string | Which registered UI block renders proposals for this action (§8). |
+| `mutates` | bool | If true, the action MUST go through dry-run (§7.2) and explicit confirmation. |
+| `authz` | authz reference | Permission requirement, checked against the principal via the authz seam (§9.3). |
+| `handler` | handler reference | Backend-side executor (§9.2). Not part of the wire contract. |
+| `dry_run` | handler reference, optional | Backend-side preview computation (§9.2). REQUIRED when `mutates` is true. |
+
+`handler` and `dry_run` are registry-resident but backend-private: they never cross the
+envelope.
+
+### 4.1 Parameter sources
+
+Every parameter is tagged `source: context` or `source: utterance`:
+
+- **`context`** — derived from application state (e.g. `transactionId` from the current
+  route). Filled by the framework from the app-provided context snapshot (§6.2). The
+  model MUST NOT be able to set, override, or observe-and-echo these into the filled
+  value; the framework fills them after model output, from context alone.
+- **`utterance`** — derived from what the user said (e.g. `country = 'NO'`). Emitted by
+  the model and validated against the param schema before the proposal is accepted.
+
+### 4.2 Record identity
+
+The model emits **intent or a predicate**; the **app resolves concrete record
+identity**. The model MUST NOT emit lists of record IDs. For bulk operations the action
+takes a predicate parameter (e.g. `deleteByPredicate(...)`) and the app evaluates the
+predicate under the user's own data-access rules (RLS or equivalent) to find matches —
+surfaced to the user via dry-run preview (§7.2).
+
+## 5. Intent resolution
+
+How the agent maps a user request onto the closed action set:
+
+1. **Select.** Registry entries are presented to the model as tool definitions; the model
+   emits a structured tool call. Small registry → present all entries in context. Large
+   registry → embed `description` fields, retrieve top-k candidates, present the
+   shortlist; the model still performs the selection. Retrieval never resolves.
+2. **Fill.** Utterance-sourced params come from the model's tool call. Context-sourced
+   params are filled by the framework from the current context snapshot (§4.1).
+3. **Validate.** Full propose-time validation (§7.1) before anything is rendered.
+4. **Low confidence → ask, never force-fit.** If selection is ambiguous, the agent
+   SHOULD disambiguate (chat question or a disambiguation block) or decline. A wrong
+   proposal is safe (the user won't confirm it) but erodes trust; declining is preferred
+   over guessing.
+
+## 6. The envelope
+
+The envelope is the transport-agnostic message set exchanged between the app frontend
+and the agent over a bidirectional stream. **The envelope defines message shapes only —
+never actions.** `action_id` is a plain string; `params` is a generic typed map. This is
+what lets the envelope stay stable while the registry evolves freely.
+
+A conforming binding (gRPC, WebSocket + JSON-RPC, tRPC, …) MUST carry every message and
+field below with equivalent semantics. The reference binding is a gRPC bidirectional
+stream (§11).
+
+### 6.1 Session
+
+A session is one authenticated stream between one frontend and the agent, bound to one
+principal. The first client message MUST be `Init`. The agent MUST reject envelope
+traffic on unauthenticated streams (§10).
+
+### 6.2 Client → agent: `ClientEvent`
+
+| Message | Fields | Semantics |
+|---|---|---|
+| `Init` | `spec_version`, `context` | Opens the session. `context` is an initial context snapshot. |
+| `ContextUpdate` | `context`, `context_seq` | Replaces the current context snapshot. `context_seq` is a client-monotonic sequence number; proposals record the snapshot they were built against (§6.4). |
+| `UserMessage` | `text`, `client_msg_id` | A user chat turn. |
+| `ConfirmAction` | `proposal_id` | The user confirms a proposal. Triggers confirm-time revalidation and execution (§7.3). |
+| `RejectAction` | `proposal_id`, `reason?` | The user declines. Terminal for that proposal; the reason MAY be fed back to the model as conversational context. |
+
+**Context shape is an app seam** (§9.5): the envelope treats `context` as a structured,
+app-defined value. The reference shape covers the common case:
+
+```
+context = {
+  route:               string      // current app route/location
+  params:              map         // route or view parameters
+  selected_record_id:  string?     // current selection, if any
+  view_type:           string?     // e.g. "detail" | "list" | ...
+  extensions:          map         // app-defined additions
+}
+```
+
+Context flows one way: app → agent. It is the *only* channel through which
+context-sourced params get filled, which is why the model never touches them.
+
+### 6.3 Agent → client: `ServerEvent`
+
+| Message | Fields | Semantics |
+|---|---|---|
+| `ChatMessage` | `msg_id`, `text`, `done` | Assistant prose. Bindings MAY stream this as deltas; `done` marks turn completion. |
+| `ActionProposal` | see §6.4 | A validated proposal, ready to render. |
+| `ProposalStateChanged` | `proposal_id`, `state`, `reason?`, `result?` | Lifecycle transitions after emission (§7): `executed` (with `result`), `failed`, `expired`, `rejected` (echo). |
+| `Error` | `code`, `message`, `recoverable` | Stream- or turn-level errors that are not proposal state changes. |
+
+### 6.4 The proposal message
+
+```
+ActionProposal = {
+  proposal_id:   string        // agent-generated, opaque, unique per session
+  action_id:     string        // MUST be a registered action ID
+  params:        map           // fully filled: context-sourced + validated utterance-sourced
+  block_type:    string        // MUST be a registered block type (normally the action's)
+  slots:         map           // typed slot values for that block (§8)
+  preview:       DryRunPreview?  // REQUIRED for mutating actions
+  context_seq:   int           // the context snapshot this proposal was built against
+  turn_msg_id:   string?       // correlates to the ChatMessage turn that produced it
+}
+
+DryRunPreview = {
+  affected_count: int          // how many records the action would touch
+  sample_ids:     string[]     // a bounded sample of affected record identifiers
+  summary:        string?      // optional human-readable one-liner
+  extensions:     map          // app-defined preview payload (e.g. a diff)
+}
+```
+
+Invariants:
+
+- A proposal that reaches the frontend is **already validated** (§7.1). Frontends MUST
+  NOT receive — and MUST refuse to render — proposals naming unregistered actions or
+  block types, or with slot values that fail the block schema.
+- `preview` MUST be present when the referenced action has `mutates: true`, and MUST
+  have been computed under the principal's own data-access rules, so the preview is
+  permission-correct: the user sees exactly what *they* can affect, nothing more.
+- Proposals are immutable once emitted. A changed intent is a **new proposal**; the old
+  one expires (§7.4).
+
+## 7. Proposal lifecycle
+
+```
+                    ┌──────────┐
+       model emits  │ proposed │  (agent-internal)
+                    └────┬─────┘
+              validation │
+            ┌────────────┼────────────┐
+            ▼                         ▼
+       ┌─────────┐               ┌─────────┐
+       │ invalid │ (terminal,    │validated│──── emitted to frontend
+       └─────────┘  never        └────┬────┘
+                    rendered)         │
+                     ┌────────────────┼─────────────────┐
+                     ▼                ▼                  ▼
+                ┌─────────┐     ┌───────────┐      ┌─────────┐
+                │ expired │     │ confirmed │      │rejected │
+                └─────────┘     └─────┬─────┘      └─────────┘
+                                      │ confirm-time revalidation
+                            ┌─────────┼─────────┐
+                            ▼         ▼         ▼
+                      ┌─────────┐ ┌────────┐ ┌────────┐
+                      │ expired │ │executed│ │ failed │
+                      └─────────┘ └────────┘ └────────┘
+```
+
+States `proposed` and `invalid` exist only agent-side; the frontend first observes a
+proposal in `validated`. Terminal states: `invalid`, `expired`, `rejected`, `executed`,
+`failed`.
+
+### 7.1 Propose-time validation (`proposed → validated | invalid`)
+
+Run by the framework before any proposal is emitted. All checks MUST pass:
+
+1. **Existence** — `action_id` is registered; `block_type` is registered.
+2. **Params typecheck** — utterance-sourced params validate against the param schema;
+   context-sourced params were filled from context (never from model output); no
+   unknown params.
+3. **Authorization** — the authz seam (§9.3) allows this principal to perform this
+   action with these params. An unauthorized action MUST NOT be proposed: the gate is at
+   propose time *and* confirm time, not confirm time only.
+4. **Slot typecheck** — slot values validate against the block type's slot schema.
+5. **Dry-run** — if `mutates: true`, the dry-run seam (§9.2) is invoked under the
+   principal and its preview attached.
+
+On failure the proposal becomes `invalid` and is never rendered; the agent SHOULD
+respond conversationally instead (disambiguate, decline, or explain).
+
+### 7.2 Dry-run
+
+`dry_run(params, principal) → DryRunPreview` is the app's answer to "what would this
+do?" It MUST be side-effect-free and MUST be computed under the principal's own
+data-access rules. The framework makes no assumption about *how* (SQL, RLS, service
+call) — the seam is just the function signature (§9.2).
+
+### 7.3 Confirmation and execution (`validated → confirmed → executed | failed | expired`)
+
+On `ConfirmAction`:
+
+1. **Revalidate.** The full §7.1 pipeline runs again against *current* state — the world
+   may have changed since the proposal was rendered (records deleted, permissions
+   revoked, context moved on). Revalidation failure → `expired`, reported via
+   `ProposalStateChanged`; nothing executes.
+2. **Execute.** The framework invokes the registered `handler(params, principal)` —
+   the app's own code, running under the user's own credentials and authorization path.
+   The agent contributes nothing to this call but the validated params.
+3. **Report.** Success → `executed` with `result`; handler error → `failed` with
+   `reason`. Both flow back as `ProposalStateChanged` and MAY be fed to the model as
+   context for the next turn.
+
+A `ConfirmAction` for an unknown, already-terminal, or expired `proposal_id` MUST be
+answered with `ProposalStateChanged` reflecting the actual state (or `Error` for
+unknown IDs) — it MUST NOT execute anything.
+
+### 7.4 Expiry (`validated → expired`)
+
+Implementations SHOULD expire pending proposals when the context snapshot they were
+built against (`context_seq`) is superseded in a way that invalidates them, and MAY
+expire on TTL. Confirm-time revalidation (§7.3) is the backstop that makes expiry a UX
+concern rather than a safety one: a stale confirm can never execute against a state it
+wasn't validated for.
+
+## 8. Dynamic UI — block types and slots
+
+The agent does not generate UI. It selects a **block type** from a closed, app-registered
+enum and fills its typed **slots**. Dynamic is the *combination* — which block, which
+slot values; the *vocabulary* is fixed, which is what keeps rendered UI auditable.
+
+- Block types are registered alongside actions (same registry source; same codegen).
+  Each declares a slot schema.
+- The frontend owns one component per block type. The framework's **block-type router**
+  ("proposal arrived → mount the registered component for `block_type`, pass `slots`")
+  is framework code even in a headless setup; app components are presentational and do
+  not know a stream exists.
+- Slot values MUST validate against the block's slot schema at propose-time (§7.1).
+  Frontends MUST refuse to render unregistered block types (defense in depth; such a
+  proposal should have been `invalid`).
+
+The framework MAY ship an optional batteries-included block pack (confirm, diff,
+bulk-preview, form) as a **separate package** — never a core dependency.
+
+## 9. Seam interfaces
+
+What the app implements. Signatures are given in language-neutral pseudocode; the Rust
+reference lib expresses them as traits, the TS lib as interfaces.
+
+**Framework owns:** the envelope and protocol, the propose-only state machine and
+dry-run hook, the registry abstraction, the validation pipeline (propose-time and
+confirm-time), the agent loop, and the frontend block router.
+
+**App plugs in:** everything below.
+
+### 9.1 Action definitions
+
+Registry entries per §4 — the app authors them; the framework only reads them.
+
+### 9.2 Handlers
+
+```
+handler(params: ValidatedParams, principal: Principal) -> Result<HandlerResult, HandlerError>
+dry_run(params: ValidatedParams, principal: Principal) -> Result<DryRunPreview, HandlerError>   // required iff mutates
+```
+
+Handlers are the app's normal execution path. The framework never constructs a
+principal; it threads through the one the transport authenticated (§10). No SQL, RLS,
+or storage assumption — `dry_run` is just a function that returns a permission-correct
+preview.
+
+### 9.3 Authorization resolver
+
+```
+authorize(principal: Principal, action_id: string, params: ValidatedParams) -> Allow | Deny(reason)
+```
+
+Called at propose time and again at confirm time. The framework treats it as opaque; the
+app maps it onto its real permission system.
+
+### 9.4 LLM provider
+
+```
+LlmProvider:
+  complete(messages, tools) -> stream of (text deltas | tool calls)
+```
+
+The single seam through which model access flows. Self-hosting story lives entirely
+here: BYO API key, fully local (e.g. Ollama, zero egress), or an internal gateway.
+Weaker local models put more weight on registry `description` quality and on
+validation/disambiguation — propose-only makes a bad selection safe, not silent; ship
+action-mapping evals (utterance + context → expected action) against recommended local
+models.
+
+### 9.5 Context shape
+
+The app defines what a context snapshot contains (§6.2 gives the reference shape) and
+how context-sourced params are extracted from it. The framework only guarantees the
+one-way flow: context comes from the app, and only the framework — never the model —
+writes context-sourced params.
+
+### 9.6 Block components
+
+One frontend component per registered block type, receiving typed slots. Registered with
+the block router; otherwise plain app code.
+
+## 10. Deployment topology and auth chain
+
+Reference topology: the agent runs **in-backend** — a crate/module inside the app
+backend process, not a separate service. Lowest latency, shares the request's
+authorization context natively, no cross-service auth surface.
+
+Auth chain:
+
+```
+user ↔ frontend            app's normal auth (OAuth 2.1 in the reference stack)
+frontend ↔ agent           the envelope stream, authenticated AS THE USER
+agent ↔ LLM                LlmProvider; the provider key is the agent's only credential
+agent → backend            proposals only; execution happens on confirm,
+                           via app handlers, under the user's credentials
+```
+
+The agent has no standing write access to anything. The agent feature MUST be cleanly
+optional (feature flag, no degraded UI when off).
+
+## 11. Transport bindings
+
+The envelope (§6) is the artifact; transport is a binding detail. A binding MUST provide:
+an authenticated bidirectional stream per session, ordered delivery per direction, and a
+faithful encoding of every envelope message.
+
+**Reference binding: gRPC bidirectional stream.** The proto defines the envelope only —
+`action_id` as a plain string, `params`/`slots` as generic structures
+(`google.protobuf.Struct`, or per-action messages if stringly-typed maps bite). The
+proto never enumerates actions; the registry evolves without proto changes.
+
+Other conforming bindings (WebSocket + JSON-RPC, tRPC, SSE + POST upstream) are
+explicitly welcome. MCP is intentionally **not** the in-app transport — it earns its
+place only for *external* agents driving the same action registry; for a first-party
+in-app agent it is overhead.
+
+## 12. Security invariants (normative summary)
+
+1. The agent MUST NOT hold write credentials to the app. Its only credential is the LLM
+   provider key.
+2. The agent MUST only reference registered action IDs and block types; anything else is
+   `invalid` and unrendered.
+3. A proposal MUST NOT execute anything. Execution requires explicit user confirmation.
+4. Execution MUST run through the app's own handler and authorization path, as the
+   authenticated principal.
+5. Context-sourced params MUST be filled by the framework from app context, never by
+   the model.
+6. The model MUST NOT emit concrete record-ID lists; bulk intent is expressed as
+   predicates the app resolves under the user's data-access rules.
+7. Dry-run previews MUST be side-effect-free and computed under the principal's own
+   permissions.
+8. Confirm-time revalidation MUST run the full validation pipeline; a stale or
+   tampered confirm MUST NOT execute.
+9. Authorization MUST be checked at propose time and again at confirm time.
+10. The rendered UI vocabulary MUST be closed: registered block types, typed slots,
+    schema-validated before render.
+
+## 13. Versioning
+
+- **Spec:** semver on this document; `Init.spec_version` lets endpoints negotiate or
+  reject.
+- **Envelope:** additive evolution only within a major version — new optional fields
+  and new message types; existing field semantics never change.
+- **Registry:** evolves freely and independently of the envelope; adding an action is
+  an app-side edit plus codegen, with no protocol change. This decoupling is the point.
+
+## Appendix A — worked example
+
+User is on `/transactions/tx_581` (context: `route`, `selected_record_id = "tx_581"`)
+and types *"remove the co-buyer from this transaction"*.
+
+1. `ContextUpdate` already gave the agent the snapshot (`context_seq = 7`).
+2. Model selects `transaction.coBuyer.remove` from the tool list and emits utterance
+   params: `{}` (nothing needed from the utterance beyond intent).
+3. Framework fills context param `transactionId = "tx_581"` — model never saw or set it.
+4. Validation: action exists ✓, params typecheck ✓, `authorize(user,
+   "transaction.coBuyer.remove", …)` ✓, action `mutates` → dry-run runs under the
+   user's permissions → `{ affected_count: 1, sample_ids: ["cb_112"], summary:
+   "Remove co-buyer Jane Doe from TX-581" }`.
+5. `ActionProposal` emitted: `block_type = "confirm"`, slots
+   `{ title: "Remove co-buyer", detail: "Jane Doe · TX-581" }`, preview attached,
+   `context_seq = 7`.
+6. Frontend block router mounts the app's `confirm` component. User clicks confirm →
+   `ConfirmAction { proposal_id }`.
+7. Framework revalidates against current state, then invokes the registered handler as
+   the user. `ProposalStateChanged { state: "executed", result: … }` flows back; the
+   model gets the outcome as context for its next turn.
+
+At no point did the agent hold a credential, touch a record ID it invented, produce
+markup, or execute anything.
