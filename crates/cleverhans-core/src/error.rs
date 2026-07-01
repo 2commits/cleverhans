@@ -75,6 +75,24 @@ pub enum ValidationFailure {
     DryRun(String),
 }
 
+impl ValidationFailure {
+    /// Whether a different model output could fix this failure.
+    ///
+    /// Selection and argument mistakes are worth a bounded retry; denials
+    /// and app-side failures (authz, unresolvable context, dry-run, slots)
+    /// are not — no rephrasing makes an unauthorized action authorized.
+    #[must_use]
+    pub fn is_model_fixable(&self) -> bool {
+        matches!(
+            self,
+            Self::UnknownAction(_)
+                | Self::InvalidParam { .. }
+                | Self::MissingParam(_)
+                | Self::UnknownParam(_)
+        )
+    }
+}
+
 /// Errors returned by app-side handlers ([`crate::seams::ActionHandler`],
 /// [`crate::seams::DryRunHandler`]).
 #[derive(Debug, thiserror::Error)]
