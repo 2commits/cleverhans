@@ -146,6 +146,51 @@
   gap: 8px;
 }
 
+/* ---------- floating widget ---------- */
+
+.ch-float {
+  position: fixed;
+  z-index: 2147483000;
+}
+
+.ch-fab {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--ch-accent);
+  color: var(--ch-accent-fg);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: grab;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
+  touch-action: none;
+  user-select: none;
+}
+
+.ch-fab:active {
+  cursor: grabbing;
+}
+
+.ch-float-panel {
+  position: absolute;
+  width: 380px;
+  height: 520px;
+  max-height: 80vh;
+  max-width: calc(100vw - 24px);
+}
+
+.ch-float-panel--above { bottom: calc(100% + 12px); }
+.ch-float-panel--below { top: calc(100% + 12px); }
+.ch-float-panel--right { right: 0; }
+.ch-float-panel--left { left: 0; }
+
+.ch-float-panel .ch-chat {
+  height: 100%;
+  background: var(--ch-bg);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.18);
+}
+
 /* ---------- buttons ---------- */
 
 .ch-btn {

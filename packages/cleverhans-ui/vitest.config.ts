@@ -5,5 +5,6 @@ export default defineConfig({
     environment: "jsdom",
     // @testing-library/react auto-cleanup hooks into the global afterEach.
     globals: true,
+    setupFiles: ["./vitest.setup.ts"],
   },
 });
