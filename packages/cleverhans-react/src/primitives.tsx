@@ -33,11 +33,14 @@ export function useBlock(): BlockProps {
   return block;
 }
 
-function Root(props: BlockProps & { children?: ReactNode }): ReactNode {
-  const { children, ...block } = props;
+function Root(
+  props: BlockProps & { children?: ReactNode; className?: string },
+): ReactNode {
+  const { children, className, ...block } = props;
   return (
     <BlockContext.Provider value={block}>
       <div
+        className={className}
         data-cleverhans-proposal={block.proposal.proposal_id}
         data-action-id={block.proposal.action_id}
         data-state={block.view.state}
@@ -49,9 +52,13 @@ function Root(props: BlockProps & { children?: ReactNode }): ReactNode {
 }
 
 /** Renders `slots.title` (or children override). */
-function Title(props: { children?: ReactNode }): ReactNode {
+function Title(props: { children?: ReactNode; className?: string }): ReactNode {
   const { slots } = useBlock();
-  return <h3 data-cleverhans-title>{props.children ?? String(slots["title"] ?? "")}</h3>;
+  return (
+    <h3 className={props.className} data-cleverhans-title>
+      {props.children ?? String(slots["title"] ?? "")}
+    </h3>
+  );
 }
 
 /**
@@ -60,6 +67,7 @@ function Title(props: { children?: ReactNode }): ReactNode {
  */
 function Preview(props: {
   children?: (preview: DryRunPreview) => ReactNode;
+  className?: string;
 }): ReactNode {
   const { proposal } = useBlock();
   const preview = proposal.preview;
@@ -67,7 +75,11 @@ function Preview(props: {
     return null;
   }
   return (
-    <div data-cleverhans-preview data-affected-count={preview.affected_count}>
+    <div
+      className={props.className}
+      data-cleverhans-preview
+      data-affected-count={preview.affected_count}
+    >
       {props.children ? props.children(preview) : (preview.summary ?? "")}
     </div>
   );

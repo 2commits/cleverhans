@@ -28,7 +28,9 @@ export interface BlockProps<S = Record<string, unknown>> {
  * const components: BlockComponents<BlockSlotsMap> = { confirm: ConfirmBlock };
  * ```
  */
-export type BlockComponents<M extends Record<string, unknown> = Record<string, unknown>> = {
+export type BlockComponents<
+  M extends Record<string, unknown> = Record<string, Record<string, unknown>>,
+> = {
   [K in keyof M]?: ComponentType<BlockProps<M[K]>>;
 };
 

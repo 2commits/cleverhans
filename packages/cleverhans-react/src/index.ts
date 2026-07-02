@@ -30,3 +30,8 @@ export {
   type BlockProps,
 } from "./router";
 export { Proposal, useBlock } from "./primitives";
+export {
+  createWebSocketTransport,
+  type ClosableTransport,
+  type WebSocketTransportOptions,
+} from "./websocket";
