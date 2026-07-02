@@ -1,0 +1,19 @@
+[package]
+name = "cleverhans-llm-anthropic"
+description = "Anthropic Claude API provider for the CleverHans LlmProvider seam"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+cleverhans-core = { path = "../cleverhans-core" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

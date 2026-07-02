@@ -3,6 +3,8 @@ members = [
     "crates/cleverhans-codegen",
     "crates/cleverhans-core",
     "crates/cleverhans-grpc",
+    "crates/cleverhans-llm-anthropic",
+    "crates/cleverhans-ws",
 ]
 resolver = "3"
 
