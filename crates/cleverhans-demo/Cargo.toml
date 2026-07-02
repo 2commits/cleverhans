@@ -1,0 +1,23 @@
+[package]
+name = "cleverhans-demo"
+description = "Runnable dogfood server + eval suite over an Eddytor-flavored document registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+async-trait = { workspace = true }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+cleverhans-core = { path = "../cleverhans-core" }
+cleverhans-evals = { path = "../cleverhans-evals" }
+cleverhans-llm-anthropic = { path = "../cleverhans-llm-anthropic" }
+cleverhans-llm-ollama = { path = "../cleverhans-llm-ollama" }
+cleverhans-ws = { path = "../cleverhans-ws" }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "fs"] }
+
+[lints]
+workspace = true

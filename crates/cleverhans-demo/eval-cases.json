@@ -1,0 +1,56 @@
+[
+  {
+    "name": "rename with explicit title",
+    "utterance": "rename this document to Q3 Roadmap",
+    "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1", "view_type": "detail" },
+    "expected": { "kind": "action", "action_id": "document.rename",
+                  "params": { "title": "Q3 Roadmap", "documentId": "doc-1" } }
+  },
+  {
+    "name": "rename phrased as 'make the title'",
+    "utterance": "make the title 'Launch Plan'",
+    "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1", "view_type": "detail" },
+    "expected": { "kind": "action", "action_id": "document.rename",
+                  "params": { "title": "Launch Plan" } }
+  },
+  {
+    "name": "publish the open document",
+    "utterance": "publish this",
+    "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1", "view_type": "detail" },
+    "expected": { "kind": "action", "action_id": "document.publish",
+                  "params": { "documentId": "doc-1" } }
+  },
+  {
+    "name": "archive the open document",
+    "utterance": "archive the current document",
+    "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1", "view_type": "detail" },
+    "expected": { "kind": "action", "action_id": "document.archive",
+                  "params": { "documentId": "doc-1" } }
+  },
+  {
+    "name": "bulk delete drafts resolves to the predicate action",
+    "utterance": "delete all draft documents",
+    "context": { "route": "/documents", "view_type": "list" },
+    "expected": { "kind": "action", "action_id": "documents.deleteByStatus",
+                  "params": { "status": "draft" } }
+  },
+  {
+    "name": "bulk delete phrased loosely",
+    "utterance": "get rid of every archived doc",
+    "context": { "route": "/documents", "view_type": "list" },
+    "expected": { "kind": "action", "action_id": "documents.deleteByStatus",
+                  "params": { "status": "archived" } }
+  },
+  {
+    "name": "out-of-scope request declines",
+    "utterance": "what's the weather in Oslo?",
+    "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1" },
+    "expected": { "kind": "decline" }
+  },
+  {
+    "name": "chit-chat declines",
+    "utterance": "hi there!",
+    "context": { "route": "/documents", "view_type": "list" },
+    "expected": { "kind": "decline" }
+  }
+]

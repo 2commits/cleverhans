@@ -181,6 +181,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "cleverhans-demo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "cleverhans-core",
+ "cleverhans-evals",
+ "cleverhans-llm-anthropic",
+ "cleverhans-llm-ollama",
+ "cleverhans-ws",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "cleverhans-evals"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "cleverhans-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "cleverhans-grpc"
 version = "0.1.0"
 dependencies = [

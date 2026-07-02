@@ -2,6 +2,8 @@
 members = [
     "crates/cleverhans-codegen",
     "crates/cleverhans-core",
+    "crates/cleverhans-demo",
+    "crates/cleverhans-evals",
     "crates/cleverhans-grpc",
     "crates/cleverhans-llm-anthropic",
     "crates/cleverhans-llm-ollama",

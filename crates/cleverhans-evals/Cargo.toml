@@ -1,0 +1,19 @@
+[package]
+name = "cleverhans-evals"
+description = "Action-mapping eval harness for CleverHans registries (utterance + context -> expected action)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cleverhans-core = { path = "../cleverhans-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

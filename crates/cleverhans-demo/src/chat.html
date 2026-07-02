@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- Dependency-free chat client speaking the CleverHans JSON envelope.
+     The React reference lib (@cleverhans/react + @cleverhans/ui) is the real
+     frontend; this page exists so `cargo run -- serve` works with nothing
+     else installed. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CleverHans demo</title>
+<style>
+  :root { font-family: system-ui, sans-serif; }
+  body { max-width: 640px; margin: 24px auto; padding: 0 12px; color: #1a1a1a; }
+  h1 { font-size: 1.1rem; }
+  #log { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; height: 420px;
+         overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 85%; padding: 8px 12px; border-radius: 10px; white-space: pre-wrap; }
+  .user { align-self: flex-end; background: #2563eb; color: #fff; }
+  .assistant { align-self: flex-start; background: #f3f4f6; }
+  .proposal { align-self: stretch; border: 1px solid #e5e7eb; border-left: 3px solid #2563eb;
+              border-radius: 10px; padding: 12px; }
+  .proposal[data-state="executed"] { border-left-color: #16a34a; opacity: .75; }
+  .proposal[data-state="rejected"], .proposal[data-state="expired"],
+  .proposal[data-state="failed"] { border-left-color: #dc2626; opacity: .75; }
+  .proposal h3 { margin: 0 0 4px; font-size: 1rem; }
+  .proposal .detail, .proposal .status { color: #6b7280; font-size: .875rem; margin: 4px 0; }
+  .proposal button { font: inherit; padding: 6px 14px; border-radius: 10px; cursor: pointer;
+                     border: 1px solid #e5e7eb; background: transparent; margin-right: 8px; }
+  .proposal button.confirm { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .proposal button:disabled { opacity: .5; cursor: not-allowed; }
+  form { display: flex; gap: 8px; margin-top: 12px; }
+  input { flex: 1; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 10px; font: inherit; }
+  .error { color: #dc2626; font-size: .875rem; }
+</style>
+</head>
+<body>
+<h1>CleverHans demo — documents</h1>
+<p style="color:#6b7280;font-size:.875rem">
+  Context: viewing <strong>doc-1 “Q3 Planning”</strong>. Try “rename this to Q3 Roadmap”,
+  “publish this”, or “delete all drafts”.
+</p>
+<div id="log"></div>
+<form id="composer">
+  <input id="draft" placeholder="Ask the assistant…" autocomplete="off" />
+  <button type="submit">Send</button>
+</form>
+<script>
+  const log = document.getElementById("log");
+  const ws = new WebSocket(`ws://${location.host}/agent`);
+  const send = (event) => ws.send(JSON.stringify(event));
+  let clientMsg = 0;
+
+  ws.addEventListener("open", () => {
+    send({ type: "init", spec_version: "0.1.0-draft",
+           context: { route: "/documents/doc-1", selected_record_id: "doc-1", view_type: "detail" } });
+  });
+
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const scroll = () => { log.scrollTop = log.scrollHeight; };
+
+  const assistant = new Map(); // msg_id -> node (delta accumulation)
+  const proposals = new Map(); // proposal_id -> node
+
+  function renderProposal(p) {
+    const box = el("div", "proposal");
+    box.dataset.state = "validated";
+    box.append(el("h3", "", p.slots.title ?? p.action_id));
+    if (p.slots.detail) box.append(el("p", "detail", p.slots.detail));
+    if (p.preview) {
+      const ids = (p.preview.sample_ids ?? []).join(", ");
+      box.append(el("p", "detail",
+        `Affects ${p.preview.affected_count} record(s)${ids ? ` — ${ids}` : ""}`));
+    }
+    const status = el("p", "status", "");
+    const confirm = el("button", "confirm", "Confirm");
+    const reject = el("button", "", "Reject");
+    confirm.onclick = () => send({ type: "confirm_action", proposal_id: p.proposal_id });
+    reject.onclick = () => send({ type: "reject_action", proposal_id: p.proposal_id, reason: null });
+    box.append(status, confirm, reject);
+    box.update = (state, reason, result) => {
+      box.dataset.state = state;
+      confirm.disabled = reject.disabled = state !== "validated";
+      status.textContent = state + (reason ? ` — ${reason}` : "")
+        + (result ? ` — ${JSON.stringify(result)}` : "");
+    };
+    proposals.set(p.proposal_id, box);
+    log.append(box); scroll();
+  }
+
+  ws.addEventListener("message", ({ data }) => {
+    const event = JSON.parse(data);
+    switch (event.type) {
+      case "chat_message": {
+        let node = assistant.get(event.msg_id);
+        if (!node) { node = el("div", "msg assistant", ""); assistant.set(event.msg_id, node); log.append(node); }
+        node.textContent = event.done ? event.text : node.textContent + event.text;
+        scroll(); break;
+      }
+      case "action_proposal": renderProposal(event); break;
+      case "proposal_state_changed": {
+        const node = proposals.get(event.proposal_id);
+        if (node) node.update(event.state, event.reason, event.result);
+        break;
+      }
+      case "error": {
+        log.append(el("div", "error", `${event.code}: ${event.message}`)); scroll();
+        break;
+      }
+    }
+  });
+
+  document.getElementById("composer").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const draft = document.getElementById("draft");
+    const text = draft.value.trim();
+    if (!text) return;
+    log.append(el("div", "msg user", text)); scroll();
+    send({ type: "user_message", text, client_msg_id: `c-${++clientMsg}` });
+    draft.value = "";
+  });
+</script>
+</body>
+</html>

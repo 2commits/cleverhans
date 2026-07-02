@@ -1,0 +1,110 @@
+//! Dogfood server + eval runner for the CleverHans demo registry.
+//!
+//! ```text
+//! ANTHROPIC_API_KEY=... cargo run -p cleverhans-demo -- serve
+//! OLLAMA_MODEL=qwen3    cargo run -p cleverhans-demo -- serve
+//! ANTHROPIC_API_KEY=... cargo run -p cleverhans-demo -- eval crates/cleverhans-demo/eval-cases.json
+//! ```
+//!
+//! `serve` hosts the chat page on <http://127.0.0.1:8787> and the envelope
+//! stream at `/agent`. `eval` runs the action-mapping suite and exits
+//! non-zero if any case fails.
+
+mod registry;
+
+use std::sync::Arc;
+
+use anyhow::{Context as _, bail};
+use axum::Router;
+use axum::http::HeaderMap;
+use axum::response::Html;
+use axum::routing::get;
+
+use cleverhans_core::agent::Agent;
+use cleverhans_core::seams::LlmProvider;
+use cleverhans_llm_anthropic::{AnthropicConfig, AnthropicProvider};
+use cleverhans_llm_ollama::{OllamaConfig, OllamaProvider};
+use cleverhans_ws::{PrincipalExtractor, agent_router};
+
+use registry::{AllowAll, DemoUser, SelectionResolver, Store, build_registry};
+
+fn provider() -> anyhow::Result<Arc<dyn LlmProvider>> {
+    if let Ok(model) = std::env::var("OLLAMA_MODEL") {
+        eprintln!("provider: ollama ({model})");
+        return Ok(Arc::new(OllamaProvider::new(OllamaConfig::new(model))));
+    }
+    if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
+        eprintln!(
+            "provider: anthropic ({})",
+            cleverhans_llm_anthropic::DEFAULT_MODEL
+        );
+        return Ok(Arc::new(AnthropicProvider::new(AnthropicConfig::new(
+            api_key,
+        ))));
+    }
+    bail!("set ANTHROPIC_API_KEY or OLLAMA_MODEL to pick a model provider");
+}
+
+fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
+    let store = Store::seeded();
+    Ok(Arc::new(Agent::new(
+        Arc::new(build_registry(&store)),
+        provider()?,
+        Arc::new(AllowAll),
+        Arc::new(SelectionResolver),
+    )))
+}
+
+/// Demo-only: every connection is the same demo user. A real app maps the
+/// session cookie / bearer token here (spec §10).
+struct EveryoneIsDemo;
+
+impl PrincipalExtractor<DemoUser> for EveryoneIsDemo {
+    fn extract(&self, _headers: &HeaderMap) -> Result<DemoUser, axum::http::StatusCode> {
+        Ok(DemoUser {
+            name: "demo".to_owned(),
+        })
+    }
+}
+
+async fn serve() -> anyhow::Result<()> {
+    let app = Router::new()
+        .route("/", get(|| async { Html(include_str!("chat.html")) }))
+        .merge(agent_router("/agent", agent()?, Arc::new(EveryoneIsDemo)));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8787")
+        .await
+        .context("bind 127.0.0.1:8787")?;
+    eprintln!("chat: http://127.0.0.1:8787  (envelope stream at /agent)");
+    axum::serve(listener, app).await.context("serve")
+}
+
+async fn eval(path: &str) -> anyhow::Result<()> {
+    let json = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
+    let cases = cleverhans_evals::load_cases(&json).context("parse cases")?;
+    let agent = agent()?;
+    let principal = DemoUser {
+        name: "eval".to_owned(),
+    };
+    eprintln!("running {} case(s) as `{}`", cases.len(), principal.name);
+    let report = cleverhans_evals::run_suite(&agent, &principal, cases).await;
+    print!("{report}");
+    if !report.all_passed() {
+        bail!("eval suite failed");
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("serve") => serve().await,
+        Some("eval") => {
+            let path = args
+                .get(2)
+                .context("usage: cleverhans-demo eval <cases.json>")?;
+            eval(path).await
+        }
+        _ => bail!("usage: cleverhans-demo <serve | eval cases.json>"),
+    }
+}
