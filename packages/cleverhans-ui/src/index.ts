@@ -5,3 +5,4 @@ export {
   type FloatingChatProps,
   type FloatPosition,
 } from "./float";
+export { HorseIcon, type HorseIconProps } from "./icon";

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { AgentChat, type AgentChatProps } from "./chat";
+import { HorseIcon } from "./icon";
 
 /** Launcher position as pixel offsets from the bottom-right viewport corner. */
 export interface FloatPosition {
@@ -199,7 +200,7 @@ export function FloatingChat(props: FloatingChatProps): ReactNode {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
-        <span aria-hidden="true">{open ? "×" : "♞"}</span>
+        {open ? <span aria-hidden="true">×</span> : <HorseIcon />}
       </button>
     </div>
   );
