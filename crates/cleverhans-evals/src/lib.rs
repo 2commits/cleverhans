@@ -255,7 +255,13 @@ mod tests {
             &self,
             request: CompletionRequest,
         ) -> Result<Vec<CompletionItem>, LlmError> {
-            let utterance = &request.messages.last().expect("non-empty").content;
+            let utterance = &request
+                .messages
+                .iter()
+                .rev()
+                .find(|turn| turn.role == cleverhans_core::seams::ChatRole::User)
+                .expect("a user turn")
+                .content;
             if utterance.contains("note") {
                 let mut arguments = JsonMap::new();
                 arguments.insert("text".to_owned(), json!("buy milk"));
