@@ -4,13 +4,16 @@
 
 use std::sync::Arc;
 
+use futures_util::StreamExt;
+use tokio::sync::mpsc;
+
 use crate::JsonMap;
 use crate::envelope::{ActionProposal, ClientEvent, Context, ServerEvent};
 use crate::error::ValidationFailure;
 use crate::proposal::{ProposalState, ProposalStore, TrackedProposal};
 use crate::registry::Registry;
 use crate::seams::{
-    AuthzResolver, ChatRole, ChatTurn, CompletionItem, CompletionRequest, ContextParamResolver,
+    AuthzResolver, ChatRole, ChatTurn, CompletionChunk, CompletionRequest, ContextParamResolver,
     LlmProvider,
 };
 use crate::validation::{CandidateAction, ValidatedAction, Validator};
@@ -140,11 +143,32 @@ impl<P: Send + Sync> Agent<P> {
         }
     }
 
-    /// Processes one client event. Infallible by design: failures surface as
-    /// [`ServerEvent::Error`] or proposal state changes, never as a broken
-    /// stream.
+    /// Processes one client event, collecting every emitted server event.
+    /// Convenience over [`Agent::handle_into`] for callers that don't need
+    /// live streaming.
     pub async fn handle(&self, session: &mut Session<P>, event: ClientEvent) -> Vec<ServerEvent> {
-        match event {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        self.handle_into(session, event, &tx).await;
+        drop(tx);
+        let mut events = Vec::new();
+        while let Ok(server_event) = rx.try_recv() {
+            events.push(server_event);
+        }
+        events
+    }
+
+    /// Processes one client event, emitting server events as they become
+    /// available — chat text arrives as `done: false` deltas followed by an
+    /// authoritative `done: true` message. Infallible by design: failures
+    /// surface as [`ServerEvent::Error`] or proposal state changes, never as
+    /// a broken stream. Stops early (silently) if the receiver is dropped.
+    pub async fn handle_into(
+        &self,
+        session: &mut Session<P>,
+        event: ClientEvent,
+        emit: &mpsc::UnboundedSender<ServerEvent>,
+    ) {
+        let events = match event {
             ClientEvent::Init {
                 spec_version,
                 context,
@@ -153,7 +177,9 @@ impl<P: Send + Sync> Agent<P> {
                 context,
                 context_seq,
             } => Self::handle_context_update(session, context, context_seq),
-            ClientEvent::UserMessage { text, .. } => self.handle_user_message(session, text).await,
+            ClientEvent::UserMessage { text, .. } => {
+                return self.handle_user_message(session, text, emit).await;
+            }
             ClientEvent::ConfirmAction { proposal_id } => {
                 self.handle_confirm(session, &proposal_id).await
             }
@@ -161,6 +187,11 @@ impl<P: Send + Sync> Agent<P> {
                 proposal_id,
                 reason,
             } => Self::handle_reject(session, &proposal_id, reason),
+        };
+        for server_event in events {
+            if emit.send(server_event).is_err() {
+                return;
+            }
         }
     }
 
@@ -214,70 +245,138 @@ impl<P: Send + Sync> Agent<P> {
         &self,
         session: &mut Session<P>,
         text: String,
-    ) -> Vec<ServerEvent> {
+        emit: &mpsc::UnboundedSender<ServerEvent>,
+    ) {
         session.history.push(ChatTurn {
             role: ChatRole::User,
             content: text,
         });
-        let mut items = match self.llm.complete(self.completion_request(session)).await {
-            Ok(items) => items,
-            Err(err) => {
-                return vec![ServerEvent::Error {
-                    code: "llm_error".to_owned(),
-                    message: err.to_string(),
-                    recoverable: true,
-                }];
-            }
-        };
-
-        let mut events = Vec::new();
         let mut retries_left = self.config.max_validation_retries;
+        // Set while a fixable validation failure is awaiting its retry
+        // completion: a provider error on that retry declines the failure
+        // instead of surfacing a stream error for an optional attempt.
+        let mut pending_failure: Option<ValidationFailure> = None;
         loop {
+            let mut stream = match self
+                .llm
+                .complete_stream(self.completion_request(session))
+                .await
+            {
+                Ok(stream) => stream,
+                Err(err) => {
+                    let event = match pending_failure {
+                        Some(failure) => self.decline(session, &failure),
+                        None => ServerEvent::Error {
+                            code: "llm_error".to_owned(),
+                            message: err.to_string(),
+                            recoverable: true,
+                        },
+                    };
+                    let _ = emit.send(event);
+                    return;
+                }
+            };
+
+            // One open text segment at a time: deltas share a msg_id, the
+            // closing `done: true` message carries the authoritative full
+            // text (clients that ignore deltas stay correct).
+            let mut segment: Option<(String, String)> = None;
             let mut retry_failure = None;
-            for item in items {
-                match item {
-                    CompletionItem::Text(content) => {
-                        session.history.push(ChatTurn {
-                            role: ChatRole::Assistant,
-                            content: content.clone(),
-                        });
-                        events.push(ServerEvent::ChatMessage {
-                            msg_id: session.next_msg_id(),
-                            text: content,
-                            done: true,
-                        });
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(CompletionChunk::TextDelta(delta)) => {
+                        let (msg_id, buffer) =
+                            segment.get_or_insert_with(|| (session.next_msg_id(), String::new()));
+                        buffer.push_str(&delta);
+                        let event = ServerEvent::ChatMessage {
+                            msg_id: msg_id.clone(),
+                            text: delta,
+                            done: false,
+                        };
+                        if emit.send(event).is_err() {
+                            return;
+                        }
                     }
-                    CompletionItem::ToolCall { name, arguments } => {
+                    Ok(CompletionChunk::TextDone) => {
+                        if Self::flush_segment(session, &mut segment, emit).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(CompletionChunk::ToolCall { name, arguments }) => {
+                        if Self::flush_segment(session, &mut segment, emit).is_err() {
+                            return;
+                        }
                         match self.propose(session, name, arguments).await {
-                            Ok(proposal) => events.push(proposal),
+                            Ok(proposal) => {
+                                if emit.send(proposal).is_err() {
+                                    return;
+                                }
+                            }
                             Err(failure) if failure.is_model_fixable() && retries_left > 0 => {
                                 // Feed the failure back for another attempt;
-                                // remaining items from this response are
-                                // dropped — they may build on the bad call.
+                                // the rest of this response is dropped — it
+                                // may build on the bad call.
                                 retries_left -= 1;
                                 retry_failure = Some(failure);
                                 break;
                             }
-                            Err(failure) => events.push(self.decline(session, &failure)),
+                            Err(failure) => {
+                                if emit.send(self.decline(session, &failure)).is_err() {
+                                    return;
+                                }
+                            }
                         }
+                    }
+                    Err(err) => {
+                        let _ = Self::flush_segment(session, &mut segment, emit);
+                        let _ = emit.send(ServerEvent::Error {
+                            code: "llm_error".to_owned(),
+                            message: err.to_string(),
+                            recoverable: true,
+                        });
+                        return;
                     }
                 }
             }
-            let Some(failure) = retry_failure else {
-                break;
-            };
-            match self.llm.complete(self.completion_request(session)).await {
-                Ok(next_items) => items = next_items,
-                // Retry budget met a provider error: fall back to declining
-                // the failure we already have rather than surfacing a
-                // stream error for an optional retry.
-                Err(_) => {
-                    events.push(self.decline(session, &failure));
-                    break;
-                }
+            drop(stream);
+            // Providers should close segments with TextDone; flush
+            // defensively if the stream ended mid-segment.
+            if Self::flush_segment(session, &mut segment, emit).is_err() {
+                return;
             }
+            let Some(failure) = retry_failure else {
+                return;
+            };
+            // Loop continues into a fresh completion carrying the failure
+            // note pushed by `propose`.
+            pending_failure = Some(failure);
         }
-        events
+    }
+
+    /// Closes the open text segment: records the full text in history and
+    /// emits the authoritative `done: true` message.
+    ///
+    /// # Errors
+    ///
+    /// `Err(())` when the receiver is gone and the caller should stop.
+    fn flush_segment(
+        session: &mut Session<P>,
+        segment: &mut Option<(String, String)>,
+        emit: &mpsc::UnboundedSender<ServerEvent>,
+    ) -> Result<(), ()> {
+        let Some((msg_id, text)) = segment.take() else {
+            return Ok(());
+        };
+        session.history.push(ChatTurn {
+            role: ChatRole::Assistant,
+            content: text.clone(),
+        });
+        emit.send(ServerEvent::ChatMessage {
+            msg_id,
+            text,
+            done: true,
+        })
+        .map_err(|_| ())
     }
 
     fn decline(&self, session: &mut Session<P>, failure: &ValidationFailure) -> ServerEvent {

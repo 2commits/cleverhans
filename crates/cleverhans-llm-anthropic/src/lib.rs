@@ -15,11 +15,14 @@
 //! silent), but avoid `__` in action IDs when using this provider.
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use cleverhans_core::JsonMap;
 use cleverhans_core::error::LlmError;
-use cleverhans_core::seams::{ChatRole, CompletionItem, CompletionRequest, LlmProvider};
+use cleverhans_core::seams::{
+    ChatRole, CompletionChunk, CompletionItem, CompletionRequest, CompletionStream, LlmProvider,
+};
 
 /// Default model; override via [`AnthropicConfig::model`].
 pub const DEFAULT_MODEL: &str = "claude-opus-4-8";
@@ -122,45 +125,191 @@ fn build_body(config: &AnthropicConfig, request: &CompletionRequest) -> Value {
     body
 }
 
+/// The subset of a Messages API response the agent loop consumes. Unknown
+/// block types (thinking, server tools, future additions) deserialize to
+/// [`ResponseBlock::Other`] and are skipped — the API evolves additively.
+#[derive(Debug, Deserialize)]
+struct MessagesResponse {
+    #[serde(default)]
+    stop_reason: Option<String>,
+    content: Vec<ResponseBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResponseBlock {
+    Text {
+        text: String,
+    },
+    ToolUse {
+        name: String,
+        #[serde(default)]
+        input: JsonMap,
+    },
+    #[serde(other)]
+    Other,
+}
+
 /// Maps a Messages API response body onto completion items.
 ///
 /// # Errors
 ///
 /// [`LlmError::Provider`] on a `refusal` stop reason or an unrecognizable
 /// body.
-fn parse_body(body: &Value) -> Result<Vec<CompletionItem>, LlmError> {
-    if body["stop_reason"] == json!("refusal") {
+fn parse_body(body: Value) -> Result<Vec<CompletionItem>, LlmError> {
+    let response: MessagesResponse = serde_json::from_value(body)
+        .map_err(|err| LlmError::Provider(format!("unrecognizable response body: {err}")))?;
+    if response.stop_reason.as_deref() == Some("refusal") {
         return Err(LlmError::Provider(
             "the model provider declined this request (stop_reason: refusal)".to_owned(),
         ));
     }
-    let blocks = body["content"]
-        .as_array()
-        .ok_or_else(|| LlmError::Provider(format!("response has no content array: {body}")))?;
-    let mut items = Vec::new();
-    for block in blocks {
-        match block["type"].as_str() {
-            Some("text") => {
-                if let Some(text) = block["text"].as_str() {
-                    items.push(CompletionItem::Text(text.to_owned()));
+    Ok(response
+        .content
+        .into_iter()
+        .filter_map(|block| match block {
+            ResponseBlock::Text { text } => Some(CompletionItem::Text(text)),
+            ResponseBlock::ToolUse { name, input } => Some(CompletionItem::ToolCall {
+                name: decode_tool_name(&name),
+                arguments: input,
+            }),
+            ResponseBlock::Other => None,
+        })
+        .collect())
+}
+
+/// The subset of Messages API SSE events the agent loop consumes, typed.
+/// Unknown event, block, and delta types deserialize to their `Other`
+/// variants and are ignored — the stream protocol evolves additively, so an
+/// unrecognized event must never break a session.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum SseEvent {
+    ContentBlockStart {
+        content_block: SseContentBlock,
+    },
+    ContentBlockDelta {
+        delta: SseDelta,
+    },
+    ContentBlockStop,
+    MessageDelta {
+        delta: SseMessageDelta,
+    },
+    Error {
+        error: Value,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum SseContentBlock {
+    Text,
+    ToolUse {
+        name: String,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum SseDelta {
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+struct SseMessageDelta {
+    #[serde(default)]
+    stop_reason: Option<String>,
+}
+
+/// Accumulates SSE events into completion chunks. Text blocks stream as
+/// deltas; `tool_use` blocks buffer their `input_json_delta` fragments and
+/// yield one complete tool call at `content_block_stop`.
+#[derive(Default)]
+struct SseAccumulator {
+    block: SseBlock,
+}
+
+#[derive(Default)]
+enum SseBlock {
+    #[default]
+    None,
+    Text,
+    Tool {
+        name: String,
+        arguments_json: String,
+    },
+}
+
+impl SseAccumulator {
+    fn on_event(&mut self, event: SseEvent) -> Result<Vec<CompletionChunk>, LlmError> {
+        match event {
+            SseEvent::ContentBlockStart { content_block } => {
+                self.block = match content_block {
+                    SseContentBlock::Text => SseBlock::Text,
+                    SseContentBlock::ToolUse { name } => SseBlock::Tool {
+                        name,
+                        arguments_json: String::new(),
+                    },
+                    SseContentBlock::Other => SseBlock::None,
+                };
+                Ok(Vec::new())
+            }
+            SseEvent::ContentBlockDelta { delta } => match delta {
+                SseDelta::TextDelta { text } => Ok(vec![CompletionChunk::TextDelta(text)]),
+                SseDelta::InputJsonDelta { partial_json } => {
+                    if let SseBlock::Tool { arguments_json, .. } = &mut self.block {
+                        arguments_json.push_str(&partial_json);
+                    }
+                    Ok(Vec::new())
                 }
+                SseDelta::Other => Ok(Vec::new()),
+            },
+            SseEvent::ContentBlockStop => match std::mem::take(&mut self.block) {
+                SseBlock::Text => Ok(vec![CompletionChunk::TextDone]),
+                SseBlock::Tool {
+                    name,
+                    arguments_json,
+                } => {
+                    let arguments: JsonMap = if arguments_json.trim().is_empty() {
+                        JsonMap::new()
+                    } else {
+                        serde_json::from_str(&arguments_json).map_err(|err| {
+                            LlmError::Provider(format!("unparseable tool arguments: {err}"))
+                        })?
+                    };
+                    Ok(vec![CompletionChunk::ToolCall {
+                        name: decode_tool_name(&name),
+                        arguments,
+                    }])
+                }
+                SseBlock::None => Ok(Vec::new()),
+            },
+            SseEvent::MessageDelta { delta } => {
+                if delta.stop_reason.as_deref() == Some("refusal") {
+                    return Err(LlmError::Provider(
+                        "the model provider declined this request (stop_reason: refusal)"
+                            .to_owned(),
+                    ));
+                }
+                Ok(Vec::new())
             }
-            Some("tool_use") => {
-                let name = block["name"]
-                    .as_str()
-                    .ok_or_else(|| LlmError::Provider("tool_use without name".to_owned()))?;
-                let arguments: JsonMap = block["input"].as_object().cloned().unwrap_or_default();
-                items.push(CompletionItem::ToolCall {
-                    name: decode_tool_name(name),
-                    arguments,
-                });
-            }
-            // Thinking and other block types carry nothing the agent loop
-            // consumes; skip them.
-            _ => {}
+            SseEvent::Error { error } => Err(LlmError::Provider(format!(
+                "anthropic stream error: {error}"
+            ))),
+            SseEvent::Other => Ok(Vec::new()),
         }
     }
-    Ok(items)
 }
 
 #[async_trait]
@@ -186,7 +335,72 @@ impl LlmProvider for AnthropicProvider {
                 "anthropic api returned {status}: {payload}"
             )));
         }
-        parse_body(&payload)
+        parse_body(payload)
+    }
+
+    async fn complete_stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<CompletionStream, LlmError> {
+        use futures_util::StreamExt;
+
+        let mut body = build_body(&self.config, &request);
+        body["stream"] = json!(true);
+        let response = self
+            .http
+            .post(format!("{}/v1/messages", self.config.base_url))
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| LlmError::Provider(err.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let payload = response.text().await.unwrap_or_default();
+            return Err(LlmError::Provider(format!(
+                "anthropic api returned {status}: {payload}"
+            )));
+        }
+
+        let mut bytes = response.bytes_stream();
+        let stream = async_stream::stream! {
+            let mut accumulator = SseAccumulator::default();
+            let mut buffer = String::new();
+            while let Some(frame) = bytes.next().await {
+                let frame = match frame {
+                    Ok(frame) => frame,
+                    Err(err) => {
+                        yield Err(LlmError::Provider(err.to_string()));
+                        return;
+                    }
+                };
+                buffer.push_str(&String::from_utf8_lossy(&frame));
+                // SSE frames are line-delimited; a network chunk may split a
+                // line, so only complete lines leave the buffer.
+                while let Some(newline) = buffer.find('\n') {
+                    let line: String = buffer.drain(..=newline).collect();
+                    let Some(data) = line.trim().strip_prefix("data:") else {
+                        continue;
+                    };
+                    let Ok(event) = serde_json::from_str::<SseEvent>(data.trim()) else {
+                        continue;
+                    };
+                    match accumulator.on_event(event) {
+                        Ok(chunks) => {
+                            for chunk in chunks {
+                                yield Ok(chunk);
+                            }
+                        }
+                        Err(err) => {
+                            yield Err(err);
+                            return;
+                        }
+                    }
+                }
+            }
+        };
+        Ok(Box::pin(stream))
     }
 }
 
@@ -262,7 +476,7 @@ mod tests {
                 ],
             });
 
-            let items = parse_body(&body).expect("parseable");
+            let items = parse_body(body).expect("parseable");
 
             assert_eq!(
                 items,
@@ -280,7 +494,67 @@ mod tests {
         fn refusal_stop_reason_is_a_provider_error() {
             let body = json!({"stop_reason": "refusal", "content": []});
 
-            let result = parse_body(&body);
+            let result = parse_body(body);
+
+            assert!(matches!(result, Err(LlmError::Provider(msg)) if msg.contains("refusal")));
+        }
+
+        #[test]
+        fn sse_accumulator_streams_text_and_buffers_tool_calls() {
+            let mut acc = SseAccumulator::default();
+            let events = [
+                json!({"type": "content_block_start", "index": 0,
+                       "content_block": {"type": "text", "text": ""}}),
+                json!({"type": "content_block_delta", "index": 0,
+                       "delta": {"type": "text_delta", "text": "Prop"}}),
+                json!({"type": "content_block_delta", "index": 0,
+                       "delta": {"type": "text_delta", "text": "osing."}}),
+                json!({"type": "content_block_stop", "index": 0}),
+                json!({"type": "content_block_start", "index": 1,
+                       "content_block": {"type": "tool_use", "id": "toolu_1",
+                                          "name": "transaction__coBuyer__remove", "input": {}}}),
+                json!({"type": "content_block_delta", "index": 1,
+                       "delta": {"type": "input_json_delta", "partial_json": "{\"count"}}),
+                json!({"type": "content_block_delta", "index": 1,
+                       "delta": {"type": "input_json_delta", "partial_json": "ry\": \"NO\"}"}}),
+                json!({"type": "content_block_stop", "index": 1}),
+            ];
+
+            let chunks: Vec<_> = events
+                .iter()
+                .flat_map(|event| {
+                    let event: SseEvent =
+                        serde_json::from_value(event.clone()).expect("typed event");
+                    acc.on_event(event).expect("valid event")
+                })
+                .collect();
+
+            let mut arguments = JsonMap::new();
+            arguments.insert("country".to_owned(), json!("NO"));
+            assert_eq!(
+                chunks,
+                vec![
+                    CompletionChunk::TextDelta("Prop".to_owned()),
+                    CompletionChunk::TextDelta("osing.".to_owned()),
+                    CompletionChunk::TextDone,
+                    CompletionChunk::ToolCall {
+                        name: "transaction.coBuyer.remove".to_owned(),
+                        arguments,
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn sse_refusal_stop_reason_is_a_provider_error() {
+            let mut acc = SseAccumulator::default();
+
+            let event: SseEvent = serde_json::from_value(
+                json!({"type": "message_delta", "delta": {"stop_reason": "refusal"}, "usage": {}}),
+            )
+            .expect("typed event");
+
+            let result = acc.on_event(event);
 
             assert!(matches!(result, Err(LlmError::Provider(msg)) if msg.contains("refusal")));
         }
@@ -295,7 +569,7 @@ mod tests {
                 ],
             });
 
-            let items = parse_body(&body).expect("parseable");
+            let items = parse_body(body).expect("parseable");
 
             assert_eq!(items, vec![CompletionItem::Text("Done.".to_owned())]);
         }

@@ -13,8 +13,8 @@ use cleverhans_core::envelope::{ClientEvent, Context, ServerEvent};
 use cleverhans_core::error::{HandlerError, LlmError};
 use cleverhans_core::registry::{ActionDef, BlockDef, ParamSource, ParamSpec, Registry, ValueType};
 use cleverhans_core::seams::{
-    ActionHandler, AuthzDecision, AuthzResolver, ChatRole, CompletionItem, CompletionRequest,
-    ContextParamResolver, LlmProvider,
+    ActionHandler, AuthzDecision, AuthzResolver, ChatRole, CompletionChunk, CompletionItem,
+    CompletionRequest, CompletionStream, ContextParamResolver, LlmProvider,
 };
 
 #[derive(Clone)]
@@ -169,6 +169,74 @@ async fn send_message(agent: &Agent<User>, session: &mut Session<User>) -> Vec<S
             },
         )
         .await
+}
+
+/// Provider with a native streaming implementation emitting fixed chunks.
+struct StreamingLlm {
+    chunks: Vec<CompletionChunk>,
+}
+
+#[async_trait]
+impl LlmProvider for StreamingLlm {
+    async fn complete(&self, _request: CompletionRequest) -> Result<Vec<CompletionItem>, LlmError> {
+        unreachable!("agent must use the streaming path");
+    }
+
+    async fn complete_stream(
+        &self,
+        _request: CompletionRequest,
+    ) -> Result<CompletionStream, LlmError> {
+        let chunks: Vec<Result<CompletionChunk, LlmError>> =
+            self.chunks.clone().into_iter().map(Ok).collect();
+        Ok(Box::pin(futures_util::stream::iter(chunks)))
+    }
+}
+
+#[tokio::test]
+async fn streaming_provider_yields_deltas_then_authoritative_message() {
+    let llm = StreamingLlm {
+        chunks: vec![
+            CompletionChunk::TextDelta("Hel".to_owned()),
+            CompletionChunk::TextDelta("lo.".to_owned()),
+            CompletionChunk::TextDone,
+        ],
+    };
+    let agent = Agent::new(
+        Arc::new(registry()),
+        Arc::new(llm),
+        Arc::new(FlagAuthz),
+        Arc::new(NoContextParams),
+    );
+    let mut session = Session::new(User { allowed: true });
+
+    let events = send_message(&agent, &mut session).await;
+
+    let [
+        ServerEvent::ChatMessage {
+            msg_id: id_a,
+            text: text_a,
+            done: false,
+        },
+        ServerEvent::ChatMessage {
+            msg_id: id_b,
+            text: text_b,
+            done: false,
+        },
+        ServerEvent::ChatMessage {
+            msg_id: id_c,
+            text: full,
+            done: true,
+        },
+    ] = &events[..]
+    else {
+        panic!("expected two deltas then the final message, got {events:?}");
+    };
+    assert!(
+        id_b == id_a && id_c == id_a,
+        "all fragments must share one msg_id: {id_a} {id_b} {id_c}"
+    );
+    assert_eq!((text_a.as_str(), text_b.as_str()), ("Hel", "lo."));
+    assert_eq!(full, "Hello.", "done:true must carry the full text");
 }
 
 #[tokio::test]

@@ -86,6 +86,18 @@ describe("AgentSession", () => {
     expect(snapshot.pending).toHaveLength(0);
   });
 
+  it("chat deltas accumulate and the final message is authoritative", () => {
+    const { transport, session } = openSession();
+
+    transport.emit({ type: "chat_message", msg_id: "msg-1", text: "Hel", done: false });
+    transport.emit({ type: "chat_message", msg_id: "msg-1", text: "lo.", done: false });
+    transport.emit({ type: "chat_message", msg_id: "msg-1", text: "Hello.", done: true });
+
+    expect(session.getSnapshot().transcript).toEqual([
+      { id: "msg-1", role: "assistant", text: "Hello." },
+    ]);
+  });
+
   it("confirm and reject send the matching client events", () => {
     const { transport, session } = openSession();
 

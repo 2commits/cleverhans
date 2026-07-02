@@ -150,10 +150,23 @@ export class AgentSession {
   #onServerEvent(event: ServerEvent): void {
     switch (event.type) {
       case "chat_message": {
-        this.#transcript = [
-          ...this.#transcript,
-          { id: event.msg_id, role: "assistant", text: event.text },
-        ];
+        // Streaming: `done: false` events carry fragments sharing a msg_id;
+        // the closing `done: true` carries the authoritative full text and
+        // replaces whatever accumulated (clients ignoring deltas stay
+        // correct — the final message is complete on its own).
+        const index = this.#transcript.findIndex((entry) => entry.id === event.msg_id);
+        if (index === -1) {
+          this.#transcript = [
+            ...this.#transcript,
+            { id: event.msg_id, role: "assistant", text: event.text },
+          ];
+        } else {
+          const existing = this.#transcript[index] as ChatEntry;
+          const text = event.done ? event.text : existing.text + event.text;
+          const next = [...this.#transcript];
+          next[index] = { ...existing, text };
+          this.#transcript = next;
+        }
         break;
       }
       case "action_proposal": {

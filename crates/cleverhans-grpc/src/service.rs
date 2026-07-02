@@ -95,14 +95,30 @@ pub async fn run_session<P, S>(
             }
             initialized = true;
         }
-        for server_event in agent.handle(&mut session, event).await {
-            if tx
-                .send(Ok(convert::server_event(server_event)))
-                .await
-                .is_err()
-            {
-                return;
+        // Forward live so chat deltas reach the client while the model is
+        // still generating, instead of after the whole turn completes.
+        let (etx, mut erx) = tokio::sync::mpsc::unbounded_channel();
+        let drive = async {
+            agent.handle_into(&mut session, event, &etx).await;
+            drop(etx);
+        };
+        let forward = async {
+            let mut receiver_alive = true;
+            while let Some(server_event) = erx.recv().await {
+                if receiver_alive
+                    && tx
+                        .send(Ok(convert::server_event(server_event)))
+                        .await
+                        .is_err()
+                {
+                    receiver_alive = false;
+                }
             }
+            receiver_alive
+        };
+        let ((), receiver_alive) = tokio::join!(drive, forward);
+        if !receiver_alive {
+            return;
         }
     }
 }

@@ -6,7 +6,10 @@
 //! the app's principal type `P` so the framework never invents its own
 //! identity model.
 
+use std::pin::Pin;
+
 use async_trait::async_trait;
+use futures_core::Stream;
 use serde::Serialize;
 
 use crate::JsonMap;
@@ -154,4 +157,54 @@ pub trait LlmProvider: Send + Sync {
     ///
     /// [`LlmError`] is surfaced to the client as a recoverable stream error.
     async fn complete(&self, request: CompletionRequest) -> Result<Vec<CompletionItem>, LlmError>;
+
+    /// Streaming variant of [`LlmProvider::complete`]. The default adapts
+    /// the non-streaming call into one-shot chunks, so providers only need
+    /// to override this when they can stream natively.
+    ///
+    /// # Errors
+    ///
+    /// [`LlmError`] on request failure; mid-stream failures arrive as `Err`
+    /// items on the stream itself.
+    async fn complete_stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<CompletionStream, LlmError> {
+        let chunks: Vec<Result<CompletionChunk, LlmError>> = self
+            .complete(request)
+            .await?
+            .into_iter()
+            .flat_map(|item| match item {
+                CompletionItem::Text(text) => {
+                    vec![CompletionChunk::TextDelta(text), CompletionChunk::TextDone]
+                }
+                CompletionItem::ToolCall { name, arguments } => {
+                    vec![CompletionChunk::ToolCall { name, arguments }]
+                }
+            })
+            .map(Ok)
+            .collect();
+        Ok(Box::pin(futures_util::stream::iter(chunks)))
+    }
 }
+
+/// One increment of streamed model output.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompletionChunk {
+    /// An incremental fragment of assistant prose.
+    TextDelta(String),
+    /// The current text segment is complete; the deltas since the last
+    /// boundary form one chat message.
+    TextDone,
+    /// A complete structured selection of one registered action. Tool calls
+    /// are never fragmented — arguments arrive whole.
+    ToolCall {
+        /// The action ID the model selected.
+        name: String,
+        /// Utterance-sourced arguments.
+        arguments: JsonMap,
+    },
+}
+
+/// Streamed completion output.
+pub type CompletionStream = Pin<Box<dyn Stream<Item = Result<CompletionChunk, LlmError>> + Send>>;

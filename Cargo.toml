@@ -4,6 +4,7 @@ members = [
     "crates/cleverhans-core",
     "crates/cleverhans-grpc",
     "crates/cleverhans-llm-anthropic",
+    "crates/cleverhans-llm-ollama",
     "crates/cleverhans-ws",
 ]
 resolver = "3"
@@ -15,7 +16,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/nordalf/cleverhans"
 
 [workspace.dependencies]
+async-stream = "0.3"
 async-trait = "0.1"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 prost = "0.14"
 prost-types = "0.14"
 serde = { version = "1", features = ["derive"] }

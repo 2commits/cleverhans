@@ -1,22 +1,21 @@
 [package]
-name = "cleverhans-core"
-description = "Reference backend for the CleverHans propose-only HITL agent protocol"
+name = "cleverhans-llm-ollama"
+description = "Ollama (local model) provider for the CleverHans LlmProvider seam"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
+async-stream = { workspace = true }
 async-trait = { workspace = true }
-futures-core = { workspace = true }
+cleverhans-core = { path = "../cleverhans-core" }
 futures-util = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
-futures-util = { workspace = true }
 tokio = { workspace = true }
 
 [lints]
