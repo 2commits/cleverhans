@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use crate::JsonMap;
 use crate::envelope::{ActionProposal, ClientEvent, Context, ServerEvent};
 use crate::error::ValidationFailure;
-use crate::proposal::{ProposalState, ProposalStore, TrackedProposal};
+use crate::proposal::{ConfirmedProposal, ProposalState, ProposalStore};
 use crate::registry::Registry;
 use crate::seams::{
     AuthzResolver, ChatRole, ChatTurn, CompletionChunk, CompletionRequest, ContextParamResolver,
@@ -473,24 +473,29 @@ impl<P: Send + Sync> Agent<P> {
                 result: None,
             }];
         }
-        let TrackedProposal {
-            proposal,
-            utterance_params,
-            ..
-        } = tracked.clone();
-        if session
-            .proposals
-            .transition(proposal_id, ProposalState::Confirmed)
-            .is_err()
-        {
+        match session.proposals.confirm(proposal_id) {
+            Ok(confirmed) => self.execute_confirmed(session, confirmed).await,
             // Guarded by the state check above; fail closed if racing.
-            return Vec::new();
+            Err(_) => Vec::new(),
         }
+    }
+
+    /// Revalidates and executes a confirmed proposal. Taking the
+    /// [`ConfirmedProposal`] witness — obtainable only from
+    /// [`crate::proposal::ProposalStore::confirm`] — makes "execute without
+    /// user confirmation" a compile error rather than a review invariant.
+    async fn execute_confirmed(
+        &self,
+        session: &mut Session<P>,
+        confirmed: ConfirmedProposal,
+    ) -> Vec<ServerEvent> {
+        let proposal = confirmed.proposal();
+        let proposal_id = proposal.proposal_id.as_str();
 
         // Confirm-time revalidation against *current* state (spec §7.3).
         let candidate = CandidateAction {
             action_id: proposal.action_id.clone(),
-            utterance_params,
+            utterance_params: confirmed.utterance_params().clone(),
         };
         let revalidated = self
             .validator()

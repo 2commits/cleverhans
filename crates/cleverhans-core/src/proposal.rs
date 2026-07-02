@@ -94,6 +94,31 @@ pub struct TrackedProposal {
     pub utterance_params: JsonMap,
 }
 
+/// Compile-time proof that one proposal crossed `validated -> confirmed`
+/// through [`ProposalStore::confirm`]. Deliberately not `Clone` and with no
+/// other constructor: holding one means the user confirmed, this session,
+/// exactly once.
+#[derive(Debug)]
+pub struct ConfirmedProposal {
+    proposal: ActionProposal,
+    utterance_params: JsonMap,
+}
+
+impl ConfirmedProposal {
+    /// The proposal as it was rendered to the user.
+    #[must_use]
+    pub fn proposal(&self) -> &ActionProposal {
+        &self.proposal
+    }
+
+    /// The model's original utterance-sourced params, for confirm-time
+    /// revalidation (spec §7.3).
+    #[must_use]
+    pub fn utterance_params(&self) -> &JsonMap {
+        &self.utterance_params
+    }
+}
+
 /// Per-session store of emitted proposals with enforced transitions.
 #[derive(Debug, Default)]
 pub struct ProposalStore {
@@ -132,13 +157,44 @@ impl ProposalStore {
         self.proposals.get(proposal_id)
     }
 
+    /// The `validated -> confirmed` edge (spec §7.3) — and the **only**
+    /// source of a [`ConfirmedProposal`] witness. The framework's execution
+    /// path takes the witness as a parameter, so "execute without a
+    /// confirmed proposal" is a compile error, not a review invariant.
+    ///
+    /// # Errors
+    ///
+    /// [`TransitionError::UnknownProposal`] if the ID is not tracked;
+    /// [`TransitionError::Illegal`] unless the proposal is pending
+    /// (`validated`).
+    pub fn confirm(&mut self, proposal_id: &str) -> Result<ConfirmedProposal, TransitionError> {
+        let tracked = self
+            .proposals
+            .get_mut(proposal_id)
+            .ok_or_else(|| TransitionError::UnknownProposal(proposal_id.to_owned()))?;
+        if !tracked.state.can_transition_to(ProposalState::Confirmed) {
+            return Err(TransitionError::Illegal {
+                from: tracked.state,
+                to: ProposalState::Confirmed,
+            });
+        }
+        tracked.state = ProposalState::Confirmed;
+        Ok(ConfirmedProposal {
+            proposal: tracked.proposal.clone(),
+            utterance_params: tracked.utterance_params.clone(),
+        })
+    }
+
     /// Applies a transition, enforcing the spec §7 legality table.
+    /// Crate-private: the lifecycle is framework-owned — external code
+    /// observes states, it never drives them (`confirm` is the one public
+    /// mutation, and it returns a witness).
     ///
     /// # Errors
     ///
     /// [`TransitionError::UnknownProposal`] if the ID is not tracked;
     /// [`TransitionError::Illegal`] if the table forbids the move.
-    pub fn transition(
+    pub(crate) fn transition(
         &mut self,
         proposal_id: &str,
         to: ProposalState,
@@ -256,6 +312,52 @@ mod tests {
                 result,
                 Err(TransitionError::UnknownProposal("nope".to_owned()))
             );
+        }
+    }
+
+    mod confirm {
+        use super::*;
+
+        #[test]
+        fn returns_the_witness_and_marks_the_proposal_confirmed() {
+            let mut store = ProposalStore::new();
+            store.insert_validated(proposal("prop-1"), JsonMap::new());
+
+            let confirmed = store.confirm("prop-1").expect("pending proposal");
+
+            assert_eq!(confirmed.proposal().proposal_id, "prop-1");
+            assert_eq!(
+                store.get("prop-1").map(|t| t.state),
+                Some(ProposalState::Confirmed)
+            );
+        }
+
+        #[test]
+        fn refuses_a_rejected_proposal() {
+            let mut store = ProposalStore::new();
+            store.insert_validated(proposal("prop-1"), JsonMap::new());
+            store
+                .transition("prop-1", ProposalState::Rejected)
+                .expect("legal transition");
+
+            let result = store.confirm("prop-1");
+
+            assert!(matches!(
+                result,
+                Err(TransitionError::Illegal {
+                    from: ProposalState::Rejected,
+                    to: ProposalState::Confirmed,
+                })
+            ));
+        }
+
+        #[test]
+        fn refuses_an_unknown_proposal() {
+            let mut store = ProposalStore::new();
+
+            let result = store.confirm("nope");
+
+            assert!(matches!(result, Err(TransitionError::UnknownProposal(id)) if id == "nope"));
         }
     }
 
