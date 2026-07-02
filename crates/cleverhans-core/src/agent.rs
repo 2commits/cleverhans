@@ -43,6 +43,12 @@ pub struct AgentConfig {
     /// model for another attempt within one user turn, before declining.
     /// Non-fixable failures (authz denial, app-side errors) never retry.
     pub max_validation_retries: u8,
+    /// Whether each completion carries a short, app-state-derived context
+    /// summary (route, view kind, whether a record is selected) to aid
+    /// action selection. The summary is informational only: it never names
+    /// record identifiers, and context-sourced params are still filled by
+    /// the framework, never the model (spec §4.1, §5).
+    pub describe_context: bool,
 }
 
 impl Default for AgentConfig {
@@ -50,8 +56,30 @@ impl Default for AgentConfig {
         Self {
             app_instructions: None,
             max_validation_retries: 2,
+            describe_context: true,
         }
     }
+}
+
+/// The app-state summary shown to the model when
+/// [`AgentConfig::describe_context`] is on. Deliberately omits record
+/// identifiers: the model resolves intent, the app resolves identity
+/// (spec §4.2), and an ID the model never saw is an ID it cannot echo.
+fn context_note(context: &Context) -> String {
+    let view = context
+        .view_type
+        .as_deref()
+        .map_or_else(String::new, |view| format!(", viewing a {view}"));
+    let selection = if context.selected_record_id.is_some() {
+        "a record is selected"
+    } else {
+        "no record is selected"
+    };
+    format!(
+        "Current app context: route `{}`{view}; {selection}. Context-derived \
+         tool parameters are filled by the application automatically.",
+        context.route
+    )
 }
 
 /// Per-stream state, bound to one principal for its whole lifetime.
@@ -134,9 +162,15 @@ impl<P: Send + Sync> Agent<P> {
     }
 
     fn completion_request(&self, session: &Session<P>) -> CompletionRequest {
-        let mut messages = Vec::with_capacity(session.history.len() + 1);
+        let mut messages = Vec::with_capacity(session.history.len() + 2);
         messages.push(self.system_turn());
         messages.extend(session.history.iter().cloned());
+        if self.config.describe_context {
+            messages.push(ChatTurn {
+                role: ChatRole::System,
+                content: context_note(&session.context),
+            });
+        }
         CompletionRequest {
             messages,
             tools: self.registry.tool_defs(),

@@ -1,8 +1,13 @@
 # CleverHans Protocol Specification
 
-**Version:** 0.1.0-draft
+**Version:** 0.1.1-draft
 **Status:** Draft
 **Tracking:** ED-536
+
+*Changes in 0.1.1: normative streaming semantics for `ChatMessage` (§6.3),
+context-summary guidance (§5), slot builders (§9.7), agent-mandate seam
+(§9.8), state-as-string rationale (§11). All additive; the wire version
+remains `0.1`.*
 
 A propose-only, in-app, human-in-the-loop (HITL) agent protocol. This document is the
 foundational artifact of the framework: it defines the **proposal envelope**, the
@@ -122,6 +127,13 @@ How the agent maps a user request onto the closed action set:
    proposal is safe (the user won't confirm it) but erodes trust; declining is preferred
    over guessing.
 
+**Context summaries.** An implementation MAY surface an app-controlled summary of the
+current context (route, view kind, whether a selection exists) to the model to aid
+selection. The summary is informational only: it never substitutes for framework-side
+param filling (§4.1), and it SHOULD omit record identifiers — the model resolves
+intent, the app resolves identity (§4.2), and an ID the model never saw is an ID it
+cannot echo.
+
 ## 6. The envelope
 
 The envelope is the transport-agnostic message set exchanged between the app frontend
@@ -169,10 +181,22 @@ context-sourced params get filled, which is why the model never touches them.
 
 | Message | Fields | Semantics |
 |---|---|---|
-| `ChatMessage` | `msg_id`, `text`, `done` | Assistant prose. Bindings MAY stream this as deltas; `done` marks turn completion. |
+| `ChatMessage` | `msg_id`, `text`, `done` | Assistant prose; see the streaming contract below. |
 | `ActionProposal` | see §6.4 | A validated proposal, ready to render. |
 | `ProposalStateChanged` | `proposal_id`, `state`, `reason?`, `result?` | Lifecycle transitions after emission (§7): `executed` (with `result`), `failed`, `expired`, `rejected` (echo). |
 | `Error` | `code`, `message`, `recoverable` | Stream- or turn-level errors that are not proposal state changes. |
+
+**Streaming contract for `ChatMessage`.** One text segment MAY be delivered as any
+number of `done: false` messages followed by exactly one `done: true` message, all
+sharing one `msg_id`:
+
+- `done: false` messages carry incremental *fragments* in order.
+- The closing `done: true` message carries the **authoritative full text** of the
+  segment — not a fragment. A client that ignores every `done: false` message and
+  renders only `done: true` messages MUST end up with a complete, correct transcript.
+- Clients MUST key accumulation by `msg_id` and MUST replace any accumulated fragments
+  with the `done: true` text.
+- A non-streaming sender emits a single `done: true` message per segment.
 
 ### 6.4 The proposal message
 
@@ -386,6 +410,32 @@ the dry-run preview into the slot values for the action's block type. Runs insid
 propose-time validation, before the slot schema check (§7.1 step 4), so its output is
 schema-validated like any other slot source. Keeping slot content app-authored closes
 the last generative surface in the rendered UI (§8): the model selects, the app phrases.
+
+### 9.8 Agent mandate (optional)
+
+```
+mandate(principal: Principal, action_id: string, params: ValidatedParams,
+        preview: DryRunPreview?) -> Allow | Deny(reason)
+```
+
+A second, optional permission layer distinct from §9.3: not "may this user do X" but
+"did this user authorize the *agent* to bring them X". It expresses the delegation
+contract between user and agent — e.g. "never bulk deletes", "nothing touching more
+than 20 records", "read-only actions only".
+
+- A mandate MUST only **narrow**: effective permission is
+  `authorize(principal, …) ∧ mandate(principal → agent, …)`. It can never grant
+  anything the app's authorization denies.
+- It SHOULD be evaluated at propose time so an out-of-mandate proposal is `invalid`
+  and never renders — this is the defense against confirmation fatigue: a
+  prompt-injected model cannot even *ask* for an action outside the mandate.
+- Because mandates naturally reference blast radius, the hook receives the dry-run
+  preview; implementations evaluating `affected_count` rules run the mandate after
+  the dry-run step of §7.1.
+- Like every seam, the policy engine behind it is the app's choice. Analyzable policy
+  languages (e.g. Cedar) suit user-editable, auditable mandates well; the closed
+  action registry enumerates directly into such a policy schema. This spec mandates
+  the hook's semantics, not an engine.
 
 ## 10. Deployment topology and auth chain
 

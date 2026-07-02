@@ -255,6 +255,59 @@ async fn every_completion_starts_with_the_system_turn() {
 }
 
 #[tokio::test]
+async fn context_note_is_the_last_message_and_names_no_ids() {
+    let (agent, requests) = agent(vec![good_call()], AgentConfig::default());
+    let mut session = Session::new(User { allowed: true });
+    agent
+        .handle(
+            &mut session,
+            ClientEvent::Init {
+                spec_version: "0.1.0-draft".to_owned(),
+                context: Context {
+                    route: "/notes/note_7".to_owned(),
+                    selected_record_id: Some("note_7".to_owned()),
+                    view_type: Some("detail".to_owned()),
+                    ..Context::default()
+                },
+            },
+        )
+        .await;
+
+    send_message(&agent, &mut session).await;
+
+    let recorded = requests.lock().expect("lock");
+    let last = recorded[0].messages.last().expect("non-empty");
+    assert!(
+        last.role == ChatRole::System
+            && last.content.contains("route `/notes/note_7`")
+            && last.content.contains("viewing a detail")
+            && last.content.contains("a record is selected"),
+        "context note wrong: {last:?}"
+    );
+}
+
+#[tokio::test]
+async fn context_note_can_be_disabled() {
+    let config = AgentConfig {
+        describe_context: false,
+        ..AgentConfig::default()
+    };
+    let (agent, requests) = agent(vec![good_call()], config);
+    let mut session = Session::new(User { allowed: true });
+
+    send_message(&agent, &mut session).await;
+
+    let recorded = requests.lock().expect("lock");
+    assert!(
+        !recorded[0]
+            .messages
+            .iter()
+            .any(|turn| turn.content.contains("Current app context")),
+        "context note must be absent when disabled"
+    );
+}
+
+#[tokio::test]
 async fn app_instructions_are_appended_to_the_system_turn() {
     let config = AgentConfig {
         app_instructions: Some("Answer in Danish.".to_owned()),
@@ -296,10 +349,15 @@ async fn retry_request_carries_the_validation_failure() {
     send_message(&agent, &mut session).await;
 
     let recorded = requests.lock().expect("lock");
-    let last = recorded[1].messages.last().expect("non-empty");
+    let last_tool_turn = recorded[1]
+        .messages
+        .iter()
+        .rev()
+        .find(|turn| turn.role == ChatRole::Tool)
+        .expect("retry request has a tool turn");
     assert!(
-        last.role == ChatRole::Tool && last.content.contains("unknown action `made.up`"),
-        "retry must see the failure as a tool turn, got {last:?}"
+        last_tool_turn.content.contains("unknown action `made.up`"),
+        "retry must see the failure as a tool turn, got {last_tool_turn:?}"
     );
 }
 
