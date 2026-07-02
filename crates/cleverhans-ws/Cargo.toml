@@ -12,6 +12,7 @@ cleverhans-core = { path = "../cleverhans-core" }
 futures-util = { version = "0.3", default-features = false }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
+tracing = "0.1"
 
 [dev-dependencies]
 async-trait = { workspace = true }

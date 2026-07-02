@@ -34,13 +34,13 @@ fn provider() -> anyhow::Result<Arc<dyn LlmProvider>> {
         return Ok(Arc::new(OllamaProvider::new(OllamaConfig::new(model))));
     }
     if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-        eprintln!(
-            "provider: anthropic ({})",
-            cleverhans_llm_anthropic::DEFAULT_MODEL
-        );
-        return Ok(Arc::new(AnthropicProvider::new(AnthropicConfig::new(
-            api_key,
-        ))));
+        // e.g. ANTHROPIC_MODEL=claude-haiku-4-5 for a cheaper/faster run.
+        let mut config = AnthropicConfig::new(api_key);
+        if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
+            config.model = model;
+        }
+        eprintln!("provider: anthropic ({})", config.model);
+        return Ok(Arc::new(AnthropicProvider::new(config)));
     }
     bail!("set ANTHROPIC_API_KEY or OLLAMA_MODEL to pick a model provider");
 }
@@ -96,6 +96,13 @@ async fn eval(path: &str) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // RUST_LOG overrides; default surfaces the WS envelope traffic.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,cleverhans_ws=info".into()),
+        )
+        .init();
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("serve") => serve().await,

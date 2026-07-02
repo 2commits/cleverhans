@@ -116,12 +116,14 @@ pub async fn run_session<P, S>(
     P: Send + Sync,
     S: Stream<Item = String> + Unpin + Send,
 {
+    tracing::info!("envelope session opened");
     let mut session = Session::new(principal);
     let mut initialized = false;
     while let Some(frame) = inbound.next().await {
         let event: ClientEvent = match serde_json::from_str(&frame) {
             Ok(event) => event,
             Err(err) => {
+                tracing::warn!(error = %err, "malformed client frame");
                 let malformed = error_json("malformed_event", &err.to_string(), true);
                 if tx.send(malformed).await.is_err() {
                     return;
@@ -129,8 +131,10 @@ pub async fn run_session<P, S>(
                 continue;
             }
         };
+        tracing::info!(event = event.kind(), "client event");
         if !initialized {
             if !matches!(event, ClientEvent::Init { .. }) {
+                tracing::warn!(event = event.kind(), "first frame was not init; closing");
                 let _ = tx
                     .send(error_json(
                         "init_required",
@@ -152,6 +156,13 @@ pub async fn run_session<P, S>(
         let forward = async {
             let mut receiver_alive = true;
             while let Some(server_event) = erx.recv().await {
+                match &server_event {
+                    // Streaming fragments are too chatty for info level.
+                    ServerEvent::ChatMessage { done: false, .. } => {
+                        tracing::debug!(event = "chat_message(delta)", "server event");
+                    }
+                    other => tracing::info!(event = other.kind(), "server event"),
+                }
                 if receiver_alive && tx.send(to_json(&server_event)).await.is_err() {
                     // Keep draining so `drive` never blocks, but stop
                     // forwarding — the client is gone.
@@ -162,7 +173,9 @@ pub async fn run_session<P, S>(
         };
         let ((), receiver_alive) = tokio::join!(drive, forward);
         if !receiver_alive {
+            tracing::info!("client gone; envelope session closed");
             return;
         }
     }
+    tracing::info!("envelope session closed");
 }

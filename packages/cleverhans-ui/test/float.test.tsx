@@ -41,6 +41,8 @@ const release = (x: number, y: number) => {
 describe("FloatingChat", () => {
   beforeEach(() => {
     localStorage.clear();
+    window.innerWidth = 1024;
+    window.innerHeight = 768;
   });
 
   it("starts closed and a click opens the chat", () => {
@@ -68,21 +70,23 @@ describe("FloatingChat", () => {
   it("dragging moves the bubble and does not toggle the panel", () => {
     const { container } = mount();
     const float = container.querySelector<HTMLElement>("[data-cleverhans-float]");
-    const before = float?.style.left;
+    expect(float?.style.right).toBe("24px");
 
-    press(100, 100);
-    move(160, 140);
-    release(160, 140);
+    // Drag 60px left / 40px up: distance to the corner grows.
+    press(500, 500);
+    move(440, 460);
+    release(440, 460);
 
-    expect(float?.style.left).not.toBe(before);
+    expect(float?.style.right).toBe("84px");
+    expect(float?.style.bottom).toBe("64px");
     expect(screen.queryByLabelText("Message")).toBeNull();
   });
 
   it("persists the dragged position under the storage key", () => {
     const { unmount } = mount("test:pos");
-    press(100, 100);
-    move(200, 160);
-    release(200, 160);
+    press(500, 500);
+    move(400, 400);
+    release(400, 400);
     const stored = localStorage.getItem("test:pos");
     expect(stored).not.toBeNull();
     unmount();
@@ -90,19 +94,39 @@ describe("FloatingChat", () => {
     const { container } = mount("test:pos");
 
     const float = container.querySelector<HTMLElement>("[data-cleverhans-float]");
-    const saved = JSON.parse(stored ?? "{}") as { x: number; y: number };
-    expect(float?.style.left).toBe(`${saved.x}px`);
+    const saved = JSON.parse(stored ?? "{}") as { right: number; bottom: number };
+    expect(float?.style.right).toBe(`${saved.right}px`);
+    expect(float?.style.bottom).toBe(`${saved.bottom}px`);
   });
 
   it("clamps the bubble inside the viewport", () => {
     const { container } = mount();
     const float = container.querySelector<HTMLElement>("[data-cleverhans-float]");
 
-    press(100, 100);
-    move(-1500, -1500);
-    release(-1500, -1500);
+    // Drag far beyond the top-left corner.
+    press(500, 500);
+    move(-2000, -2000);
+    release(-2000, -2000);
 
-    expect(float?.style.left).toBe("8px");
-    expect(float?.style.top).toBe("8px");
+    // 1024 - 52 (bubble) - 8 (margin) = 964; 768 - 52 - 8 = 708.
+    expect(float?.style.right).toBe("964px");
+    expect(float?.style.bottom).toBe("708px");
+  });
+
+  it("re-clamps when the window shrinks", () => {
+    const { container } = mount();
+    const float = container.querySelector<HTMLElement>("[data-cleverhans-float]");
+    press(500, 500);
+    move(-2000, -2000);
+    release(-2000, -2000);
+    expect(float?.style.right).toBe("964px");
+
+    window.innerWidth = 400;
+    window.innerHeight = 400;
+    fireEvent(window, new Event("resize"));
+
+    // 400 - 52 - 8 = 340 on both axes.
+    expect(float?.style.right).toBe("340px");
+    expect(float?.style.bottom).toBe("340px");
   });
 });

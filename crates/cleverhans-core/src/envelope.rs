@@ -71,6 +71,20 @@ pub enum ClientEvent {
     },
 }
 
+impl ClientEvent {
+    /// The wire tag of this event, for logging and metrics.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Init { .. } => "init",
+            Self::ContextUpdate { .. } => "context_update",
+            Self::UserMessage { .. } => "user_message",
+            Self::ConfirmAction { .. } => "confirm_action",
+            Self::RejectAction { .. } => "reject_action",
+        }
+    }
+}
+
 /// Permission-correct preview of what a mutating action would do (spec §6.4).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DryRunPreview {
@@ -147,6 +161,19 @@ pub enum ServerEvent {
         /// Whether the session can continue.
         recoverable: bool,
     },
+}
+
+impl ServerEvent {
+    /// The wire tag of this event, for logging and metrics.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::ChatMessage { .. } => "chat_message",
+            Self::ActionProposal(_) => "action_proposal",
+            Self::ProposalStateChanged { .. } => "proposal_state_changed",
+            Self::Error { .. } => "error",
+        }
+    }
 }
 
 #[cfg(test)]
