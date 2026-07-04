@@ -7,6 +7,7 @@
 //! identity model.
 
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
@@ -84,9 +85,53 @@ pub trait ContextParamResolver: Send + Sync {
 /// dry-run preview. App code, not model output: even slot *content* comes
 /// from the app in the reference implementation, keeping the rendered UI
 /// fully closed-vocabulary.
+///
+/// Three ways to register one, in order of reach:
+///
+/// - fixed card content: [`static_slots`] with the [`slots!`](crate::slots)
+///   macro
+/// - content from params/preview: any closure, via the blanket impl below
+/// - content needing owned state (store handles, etc.): implement the trait
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::envelope::DryRunPreview;
+/// use cleverhans_core::seams::{SlotBuilder, static_slots};
+/// use cleverhans_core::{JsonMap, slots};
+///
+/// // Fixed:
+/// let publish = static_slots(slots! { "title": "Publish document" });
+///
+/// // Param-aware:
+/// let rename: Arc<dyn SlotBuilder> =
+///     Arc::new(|params: &JsonMap, _: Option<&DryRunPreview>| {
+///         slots! {
+///             "title": "Rename document",
+///             "detail": format!("New title: {}", params["title"]),
+///         }
+///     });
+/// ```
 pub trait SlotBuilder: Send + Sync {
     /// Produces the slot map validated against the block's slot schema.
     fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap;
+}
+
+/// Closures are slot builders, so per-action registrations stay inline.
+impl<F> SlotBuilder for F
+where
+    F: Fn(&JsonMap, Option<&DryRunPreview>) -> JsonMap + Send + Sync,
+{
+    fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
+        self(params, preview)
+    }
+}
+
+/// A [`SlotBuilder`] that emits the same slots for every proposal — for
+/// actions whose card content is fixed and the dry-run summary says the
+/// rest. See [`SlotBuilder`] for the full menu.
+#[must_use]
+pub fn static_slots(slots: JsonMap) -> Arc<dyn SlotBuilder> {
+    Arc::new(move |_: &JsonMap, _: Option<&DryRunPreview>| slots.clone())
 }
 
 /// One entry in the model-facing tool list, derived from the registry.

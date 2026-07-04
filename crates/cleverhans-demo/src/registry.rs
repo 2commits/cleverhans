@@ -14,8 +14,9 @@ use cleverhans_core::registry::{
     ActionDef, BlockDef, ParamSource, ParamSpec, Registry, SlotSpec, ValueType,
 };
 use cleverhans_core::seams::{
-    ActionHandler, AuthzDecision, AuthzResolver, ContextParamResolver, DryRunHandler, SlotBuilder,
+    ActionHandler, AuthzDecision, AuthzResolver, ContextParamResolver, DryRunHandler, static_slots,
 };
+use cleverhans_core::slots;
 
 /// The demo principal. Everyone may do everything — this is a dogfood
 /// server, not an auth reference.
@@ -201,9 +202,10 @@ impl DryRunHandler<DemoUser> for DeleteByStatus {
         Ok(DryRunPreview {
             affected_count: matching.len() as u64,
             sample_ids: matching.iter().take(5).map(|d| d.id.clone()).collect(),
+            // `BulkPreviewBlock` already prints the affected count, so the
+            // summary carries only the predicate.
             summary: Some(format!(
-                "Delete {} {} document(s)",
-                matching.len(),
+                "every {} document",
                 param_str(params, "status").unwrap_or("?")
             )),
             extensions: JsonMap::new(),
@@ -211,19 +213,6 @@ impl DryRunHandler<DemoUser> for DeleteByStatus {
     }
 }
 
-/// Title/detail slots from the dry-run preview.
-struct PreviewSlots(&'static str);
-
-impl SlotBuilder for PreviewSlots {
-    fn build(&self, _params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
-        let mut slots = JsonMap::new();
-        slots.insert("title".to_owned(), json!(self.0));
-        if let Some(summary) = preview.and_then(|p| p.summary.as_deref()) {
-            slots.insert("detail".to_owned(), json!(summary));
-        }
-        slots
-    }
-}
 
 pub struct AllowAll;
 
@@ -325,7 +314,15 @@ pub fn build_registry(store: &Store) -> Registry<DemoUser> {
             },
             Arc::new(Rename(store.clone())),
             Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(Arc::new(PreviewSlots("Rename document"))),
+            // The dry-run summary names the current title; `detail` carries
+            // the utterance-sourced new title so the card shows both.
+            Some(Arc::new(|params: &JsonMap, _: Option<&DryRunPreview>| {
+                let new_title = params.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                slots! {
+                    "title": "Rename document",
+                    "detail": format!("New title: \u{201c}{new_title}\u{201d}"),
+                }
+            })),
         )
         .action(
             single_doc_action(
@@ -334,7 +331,7 @@ pub fn build_registry(store: &Store) -> Registry<DemoUser> {
             ),
             Arc::new(SetStatus(store.clone(), DocStatus::Published)),
             Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(Arc::new(PreviewSlots("Publish document"))),
+            Some(static_slots(slots! { "title": "Publish document" })),
         )
         .action(
             single_doc_action(
@@ -343,7 +340,7 @@ pub fn build_registry(store: &Store) -> Registry<DemoUser> {
             ),
             Arc::new(SetStatus(store.clone(), DocStatus::Archived)),
             Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(Arc::new(PreviewSlots("Archive document"))),
+            Some(static_slots(slots! { "title": "Archive document" })),
         )
         .action(
             ActionDef {
@@ -369,7 +366,7 @@ pub fn build_registry(store: &Store) -> Registry<DemoUser> {
             },
             Arc::new(DeleteByStatus(store.clone())),
             Some(Arc::new(DeleteByStatus(store.clone()))),
-            Some(Arc::new(PreviewSlots("Bulk delete documents"))),
+            Some(static_slots(slots! { "title": "Bulk delete documents" })),
         )
         .build()
         .expect("demo registry is valid")

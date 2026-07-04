@@ -7,41 +7,66 @@
 import { Proposal, type BlockProps } from "@cleverhans/react";
 import type { ReactNode } from "react";
 
-function statusLine(state: string, reason?: string): ReactNode {
+import { HorseIcon } from "./icon";
+
+const STATUS_LABELS: Record<string, string> = {
+  executed: "✓ Done",
+  failed: "✗ Failed",
+  rejected: "Rejected",
+  expired: "Expired",
+  unknown: "Unavailable",
+};
+
+/**
+ * The lifecycle-driven tail of a block: confirm/reject while the decision
+ * is open, the working indicator while the agent executes, a receipt line
+ * once the proposal is terminal.
+ */
+function Footer(props: BlockProps): ReactNode {
+  const { state, working, reason } = props.view;
+  if (working || state === "confirmed") {
+    return (
+      <div className="ch-block-working" role="status">
+        <HorseIcon size={15} />
+        <span>On it</span>
+        <span className="ch-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      </div>
+    );
+  }
   if (state === "validated") {
-    return null;
+    return (
+      <div className="ch-block-actions">
+        <Proposal.Confirm className="ch-btn ch-btn--confirm" />
+        <Proposal.Reject className="ch-btn ch-btn--reject" />
+      </div>
+    );
   }
   return (
     <p className="ch-block-status" data-cleverhans-status>
-      {state}
+      {STATUS_LABELS[state] ?? state}
       {reason ? ` — ${reason}` : ""}
     </p>
   );
 }
 
-function Actions(): ReactNode {
-  return (
-    <div className="ch-block-actions">
-      <Proposal.Confirm className="ch-btn ch-btn--confirm" />
-      <Proposal.Reject className="ch-btn ch-btn--reject" />
-    </div>
-  );
-}
-
 /**
- * The default block: title, optional detail slot, dry-run summary,
+ * The default block: title, dry-run summary, optional detail slot,
  * confirm/reject. Suits any action whose `confirm` block carries
- * `{ title, detail? }` slots.
+ * `{ title, detail? }` slots. The summary names what the action touches;
+ * `detail` describes the change, so it reads current state → new state.
  */
 export function ConfirmBlock(props: BlockProps): ReactNode {
   const detail = props.slots["detail"];
   return (
     <Proposal.Root {...props} className="ch-block ch-block--confirm">
       <Proposal.Title className="ch-block-title" />
-      {detail != null && <p className="ch-block-preview">{String(detail)}</p>}
       <Proposal.Preview className="ch-block-preview" />
-      {statusLine(props.view.state, props.view.reason)}
-      <Actions />
+      {detail != null && <p className="ch-block-preview">{String(detail)}</p>}
+      <Footer {...props} />
     </Proposal.Root>
   );
 }
@@ -73,8 +98,7 @@ export function BulkPreviewBlock(props: BlockProps): ReactNode {
           </>
         )}
       </Proposal.Preview>
-      {statusLine(props.view.state, props.view.reason)}
-      <Actions />
+      <Footer {...props} />
     </Proposal.Root>
   );
 }

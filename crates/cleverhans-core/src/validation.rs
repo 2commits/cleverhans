@@ -227,14 +227,13 @@ mod tests {
         }
     }
 
-    struct TitleSlot;
-
-    impl SlotBuilder for TitleSlot {
-        fn build(&self, _params: &JsonMap, _preview: Option<&DryRunPreview>) -> JsonMap {
+    /// Uses the closure blanket impl of [`SlotBuilder`], keeping it covered.
+    fn title_slot() -> Arc<dyn SlotBuilder> {
+        Arc::new(|_: &JsonMap, _: Option<&DryRunPreview>| {
             let mut slots = JsonMap::new();
             slots.insert("title".to_owned(), json!("Remove record"));
             slots
-        }
+        })
     }
 
     struct KeyAuthz;
@@ -306,7 +305,7 @@ mod tests {
                 },
                 Arc::new(NoopHandler),
                 Some(Arc::new(OnePreview)),
-                Some(Arc::new(TitleSlot)),
+                Some(title_slot()),
             )
             .build()
             .expect("valid registry")

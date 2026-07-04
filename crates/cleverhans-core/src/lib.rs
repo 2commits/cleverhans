@@ -28,3 +28,32 @@ pub const SPEC_VERSION: &str = "0.1";
 
 /// JSON object type used for `params`, `slots`, and extension maps.
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use serde_json;
+}
+
+/// Builds a [`JsonMap`] with [`serde_json::json!`] object syntax — the slot
+/// counterpart to `json!`, for use in [`seams::SlotBuilder`] closures and
+/// [`seams::static_slots`]:
+///
+/// ```
+/// use cleverhans_core::slots;
+///
+/// let new_title = "Launch Plan";
+/// let map = slots! {
+///     "title": "Rename document",
+///     "detail": format!("New title: {new_title}"),
+/// };
+/// assert_eq!(map["title"], "Rename document");
+/// ```
+#[macro_export]
+macro_rules! slots {
+    ( $($tt:tt)* ) => {
+        match $crate::__private::serde_json::json!({ $($tt)* }) {
+            $crate::__private::serde_json::Value::Object(map) => map,
+            _ => unreachable!("json! with braces always yields an object"),
+        }
+    };
+}

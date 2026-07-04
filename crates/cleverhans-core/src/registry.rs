@@ -180,7 +180,9 @@ pub struct ActionRegistration<P> {
     pub handler: Arc<dyn ActionHandler<P>>,
     /// Preview computation; present iff `def.mutates` (enforced at build).
     pub dry_run: Option<Arc<dyn DryRunHandler<P>>>,
-    /// Slot content builder; `None` renders empty slots.
+    /// Slot content builder; `None` renders empty slots. Fixed cards use
+    /// [`static_slots`](crate::seams::static_slots); param-aware cards pass
+    /// a closure (see [`SlotBuilder`]).
     pub slot_builder: Option<Arc<dyn SlotBuilder>>,
 }
 
