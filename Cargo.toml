@@ -1,13 +1,36 @@
 [workspace]
 members = [
     "crates/cleverhans-codegen",
+    "crates/cleverhans-conformance",
     "crates/cleverhans-core",
     "crates/cleverhans-demo",
     "crates/cleverhans-evals",
+    "crates/cleverhans-ffi",
+    "crates/cleverhans-grpc",
+    "crates/cleverhans-llm-anthropic",
+    "crates/cleverhans-llm-ollama",
+    "crates/cleverhans-node",
+    "crates/cleverhans-py",
+    "crates/cleverhans-ws",
+    "crates/cleverhans-ws-core",
+]
+# The binding crates are excluded from default-members: cleverhans-py links
+# via the Python interpreter (maturin builds/tests it through pytest) and
+# cleverhans-node's tests run through napi + vitest. Plain `cargo test` and
+# `cargo clippy` skip BOTH — lint them explicitly with
+# `cargo clippy -p cleverhans-py -p cleverhans-node`.
+default-members = [
+    "crates/cleverhans-codegen",
+    "crates/cleverhans-conformance",
+    "crates/cleverhans-core",
+    "crates/cleverhans-demo",
+    "crates/cleverhans-evals",
+    "crates/cleverhans-ffi",
     "crates/cleverhans-grpc",
     "crates/cleverhans-llm-anthropic",
     "crates/cleverhans-llm-ollama",
     "crates/cleverhans-ws",
+    "crates/cleverhans-ws-core",
 ]
 resolver = "3"
 
