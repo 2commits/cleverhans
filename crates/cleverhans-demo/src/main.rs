@@ -10,7 +10,7 @@
 //! stream at `/agent`. `eval` runs the action-mapping suite and exits
 //! non-zero if any case fails.
 
-mod registry;
+use cleverhans_demo::registry;
 
 use std::sync::Arc;
 
@@ -20,13 +20,13 @@ use axum::http::HeaderMap;
 use axum::response::Html;
 use axum::routing::get;
 
-use cleverhans_core::agent::Agent;
+use cleverhans_core::agent::{Agent, AgentConfig};
 use cleverhans_core::seams::LlmProvider;
 use cleverhans_llm_anthropic::{AnthropicConfig, AnthropicProvider};
 use cleverhans_llm_ollama::{OllamaConfig, OllamaProvider};
 use cleverhans_ws::{PrincipalExtractor, agent_router};
 
-use registry::{AllowAll, DemoUser, SelectionResolver, Store, build_registry};
+use registry::{AllowAll, DemoUser, Store, build_registry, context_resolver};
 
 fn provider() -> anyhow::Result<Arc<dyn LlmProvider>> {
     if let Ok(model) = std::env::var("OLLAMA_MODEL") {
@@ -47,11 +47,22 @@ fn provider() -> anyhow::Result<Arc<dyn LlmProvider>> {
 
 fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
     let store = Store::seeded();
-    Ok(Arc::new(Agent::new(
+    let config = AgentConfig {
+        app_instructions: Some(
+            "This app is a document workspace: the selected record is always a \
+             document, and document tools act on it. You cannot navigate or \
+             open documents yourself — when nothing is selected, tell the user \
+             what to open, and once they have navigated, call the tool again."
+                .to_owned(),
+        ),
+        ..AgentConfig::default()
+    };
+    Ok(Arc::new(Agent::with_config(
         Arc::new(build_registry(&store)),
         provider()?,
         Arc::new(AllowAll),
-        Arc::new(SelectionResolver),
+        Arc::new(context_resolver()),
+        config,
     )))
 }
 
