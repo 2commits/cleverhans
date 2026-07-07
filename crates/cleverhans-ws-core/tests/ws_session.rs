@@ -20,7 +20,7 @@ use cleverhans_core::seams::{
     ActionHandler, AuthzDecision, AuthzResolver, CompletionItem, CompletionRequest,
     ContextParamResolver, DryRunHandler, LlmProvider, SlotBuilder,
 };
-use cleverhans_ws::run_session;
+use cleverhans_ws_core::run_session;
 
 #[derive(Clone)]
 struct User;

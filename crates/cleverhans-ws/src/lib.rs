@@ -1,8 +1,7 @@
-//! WebSocket + JSON binding of the CleverHans envelope (spec §11), built on
-//! axum. This is the binding `@cleverhans/react`'s `createWebSocketTransport`
-//! speaks: each frame is one envelope message in the serde JSON encoding of
-//! `cleverhans-core` — no translation layer, the wire shapes *are* the core
-//! types.
+//! Axum adapter for the WebSocket + JSON binding of the CleverHans envelope
+//! (spec §11). This is the binding `@cleverhans/react`'s
+//! `createWebSocketTransport` speaks; the session loop itself lives in
+//! `cleverhans-ws-core` and is framework-neutral.
 //!
 //! Same transport rules as the gRPC binding: the stream is authenticated
 //! before any envelope traffic (principal from HTTP headers at upgrade), and
@@ -16,11 +15,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use futures_util::{Stream, StreamExt};
+use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
-use cleverhans_core::agent::{Agent, Session};
-use cleverhans_core::envelope::{ClientEvent, ServerEvent};
+use cleverhans_core::agent::Agent;
+pub use cleverhans_ws_core::{run_session, to_json};
 
 /// Authenticates an upgrade request: maps HTTP headers (cookie, bearer
 /// token, …) onto the app's principal. The framework never constructs a
@@ -87,95 +86,4 @@ async fn serve_socket<P: Send + Sync>(socket: WebSocket, agent: Arc<Agent<P>>, p
         }
     };
     tokio::join!(run_session(agent, principal, inbound, tx), writer);
-}
-
-fn to_json(event: &ServerEvent) -> String {
-    serde_json::to_string(event).unwrap_or_else(|_| {
-        // Envelope types serialize infallibly; keep a defensive fallback.
-        r#"{"type":"error","code":"encode_failed","message":"","recoverable":false}"#.to_owned()
-    })
-}
-
-fn error_json(code: &str, message: &str, recoverable: bool) -> String {
-    to_json(&ServerEvent::Error {
-        code: code.to_owned(),
-        message: message.to_owned(),
-        recoverable,
-    })
-}
-
-/// Drives one session over JSON text frames: decodes inbound events,
-/// enforces init-first ordering, feeds the agent, encodes outbound events.
-/// Factored out of the axum handler so it is testable against any stream.
-pub async fn run_session<P, S>(
-    agent: Arc<Agent<P>>,
-    principal: P,
-    mut inbound: S,
-    tx: mpsc::Sender<String>,
-) where
-    P: Send + Sync,
-    S: Stream<Item = String> + Unpin + Send,
-{
-    tracing::info!("envelope session opened");
-    let mut session = Session::new(principal);
-    let mut initialized = false;
-    while let Some(frame) = inbound.next().await {
-        let event: ClientEvent = match serde_json::from_str(&frame) {
-            Ok(event) => event,
-            Err(err) => {
-                tracing::warn!(error = %err, "malformed client frame");
-                let malformed = error_json("malformed_event", &err.to_string(), true);
-                if tx.send(malformed).await.is_err() {
-                    return;
-                }
-                continue;
-            }
-        };
-        tracing::info!(event = event.kind(), "client event");
-        if !initialized {
-            if !matches!(event, ClientEvent::Init { .. }) {
-                tracing::warn!(event = event.kind(), "first frame was not init; closing");
-                let _ = tx
-                    .send(error_json(
-                        "init_required",
-                        "first message on a stream must be `init` (spec §6.1)",
-                        false,
-                    ))
-                    .await;
-                return;
-            }
-            initialized = true;
-        }
-        // Forward live so chat deltas reach the client while the model is
-        // still generating, instead of after the whole turn completes.
-        let (etx, mut erx) = mpsc::unbounded_channel();
-        let drive = async {
-            agent.handle_into(&mut session, event, &etx).await;
-            drop(etx);
-        };
-        let forward = async {
-            let mut receiver_alive = true;
-            while let Some(server_event) = erx.recv().await {
-                match &server_event {
-                    // Streaming fragments are too chatty for info level.
-                    ServerEvent::ChatMessage { done: false, .. } => {
-                        tracing::debug!(event = "chat_message(delta)", "server event");
-                    }
-                    other => tracing::info!(event = other.kind(), "server event"),
-                }
-                if receiver_alive && tx.send(to_json(&server_event)).await.is_err() {
-                    // Keep draining so `drive` never blocks, but stop
-                    // forwarding — the client is gone.
-                    receiver_alive = false;
-                }
-            }
-            receiver_alive
-        };
-        let ((), receiver_alive) = tokio::join!(drive, forward);
-        if !receiver_alive {
-            tracing::info!("client gone; envelope session closed");
-            return;
-        }
-    }
-    tracing::info!("envelope session closed");
 }
