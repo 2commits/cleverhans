@@ -155,7 +155,7 @@ Exits non-zero on any failure. When adding an action, add eval cases covering: h
 
 ## TypeScript frontend
 
-Packages: `@cleverhans/react` (headless: session store, hooks, block router, WS transport) and `@cleverhans/ui` (styled `AgentChat` / `FloatingChat` + default blocks). Canonical example: `packages/playground/src/App.tsx`. Keep TS envelope types in sync with Rust via `cleverhans-codegen` (Rust registry → TS types).
+Packages: `@cleverhans/react` (headless: session store, hooks, block router, WS transport) and `@cleverhans/ui` (styled `AgentChat` / `FloatingChat` + default blocks). Canonical example: `typescript/playground/src/App.tsx`. Keep TS envelope types in sync with Rust via `cleverhans-codegen` (Rust registry → TS types).
 
 ### Session setup (framework-agnostic core)
 

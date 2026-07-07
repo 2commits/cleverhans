@@ -1,0 +1,658 @@
+/*
+ * @cleverhans/ui — optional styles. Minimal, warm, horse-adjacent: paper
+ * background, warm ink, a single chestnut accent, hairline borders. All of
+ * it themes through CSS variables — override them or skip the import and
+ * style the ch-* classes yourself.
+ */
+
+:root {
+  --ch-font: ui-sans-serif, system-ui, sans-serif;
+  --ch-bg: #fbfaf8;            /* paper */
+  --ch-fg: #211d19;            /* warm ink */
+  --ch-muted: #8a8378;
+  --ch-border: #e8e3dc;        /* hairline */
+  --ch-accent: #8a5a33;        /* chestnut */
+  --ch-accent-fg: #fbfaf8;
+  --ch-ok: #5f7554;
+  --ch-danger: #a34d3f;
+  --ch-user-bubble: #211d19;
+  --ch-user-bubble-fg: #fbfaf8;
+  --ch-radius: 10px;
+}
+
+/*
+ * The widget owns its box model: without this, sizing depends on whether
+ * the host page ships a border-box reset (height: 100% + padding overflows
+ * on content-box hosts). Scoped to ch-* roots so nothing leaks outward.
+ */
+.ch-chat,
+.ch-chat *,
+.ch-float,
+.ch-float * {
+  box-sizing: border-box;
+}
+
+/* ---------- chat window ---------- */
+
+.ch-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 320px;
+  font-family: var(--ch-font);
+  font-size: 0.9375rem;
+  color: var(--ch-fg);
+  background: var(--ch-bg);
+  border: 1px solid var(--ch-border);
+  border-radius: var(--ch-radius);
+  overflow: hidden;
+}
+
+/*
+ * The flow: every turn stays in the scroll as a section — ask eyebrow,
+ * page-like answer, and that turn's proposal cards/receipts inline. The
+ * whole session reads as one audit trail.
+ */
+
+.ch-filter {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ch-border);
+}
+
+.ch-filter-btn {
+  font: inherit;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ch-muted);
+  cursor: pointer;
+}
+
+.ch-filter-btn:hover {
+  color: var(--ch-fg);
+}
+
+.ch-filter-btn[aria-pressed="true"] {
+  color: var(--ch-accent);
+  border-color: var(--ch-accent);
+}
+
+.ch-flow {
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-flow-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 20px 18px;
+  animation: ch-stage-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ch-flow-turn + .ch-flow-turn {
+  border-top: 1px solid var(--ch-border);
+}
+
+.ch-stage-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ch-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 20px;
+  animation: ch-stage-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/*
+ * Enter from the top: upward overflow in a scroll container is clipped,
+ * never scrollable, so the animation can't flash a scrollbar the way a
+ * slide-from-bottom does.
+ */
+@keyframes ch-stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ch-stage--empty {
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--ch-muted);
+  text-align: center;
+}
+
+.ch-stage--empty p {
+  margin: 0;
+  font-size: 0.875rem;
+  max-width: 220px;
+  line-height: 1.5;
+}
+
+.ch-stage-ask {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ch-border);
+  font-size: 0.8125rem;
+  color: var(--ch-muted);
+  overflow-wrap: anywhere;
+}
+
+.ch-stage-ask-label {
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ch-accent);
+}
+
+.ch-stage-text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Blinking caret at the tail of a streaming assistant message. */
+.ch-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--ch-accent);
+  animation: ch-blink 900ms steps(2, start) infinite;
+}
+
+@keyframes ch-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* The shared three-dot thinking pulse. */
+.ch-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.ch-dots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ch-muted);
+  animation: ch-dot 1.1s ease-in-out infinite;
+}
+
+.ch-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.ch-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes ch-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: none;
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.ch-msg--user {
+  align-self: flex-end;
+  background: var(--ch-user-bubble);
+  color: var(--ch-user-bubble-fg);
+}
+
+.ch-msg--assistant {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--ch-border);
+}
+
+.ch-error {
+  margin: 0 16px 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--ch-danger);
+  border-radius: var(--ch-radius);
+  color: var(--ch-danger);
+  font-size: 0.8125rem;
+}
+
+.ch-composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ch-border);
+  background: var(--ch-bg);
+}
+
+.ch-composer-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--ch-border);
+  border-radius: var(--ch-radius);
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+
+.ch-composer-input::placeholder {
+  color: var(--ch-muted);
+}
+
+.ch-composer-input:focus-visible {
+  outline: none;
+  border-color: var(--ch-accent);
+}
+
+/* ---------- proposal blocks ---------- */
+
+.ch-block {
+  align-self: stretch;
+  border: 1px solid var(--ch-border);
+  border-radius: var(--ch-radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--ch-bg);
+}
+
+.ch-block[data-state="executed"] {
+  border-color: var(--ch-ok);
+  opacity: 0.65;
+}
+
+/* The agent is executing: chestnut edge, a slow light sweep, and the
+   cantering horse in the footer. */
+.ch-block[data-working="true"],
+.ch-block[data-state="confirmed"] {
+  border-color: var(--ch-accent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 40%,
+    rgb(138 90 51 / 0.08) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: ch-sweep 1.4s linear infinite;
+}
+
+@keyframes ch-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.ch-block-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  color: var(--ch-accent);
+}
+
+.ch-block-working svg {
+  animation: ch-canter 900ms ease-in-out infinite;
+}
+
+@keyframes ch-canter {
+  0%,
+  100% {
+    transform: none;
+  }
+  25% {
+    transform: translateY(-1.5px) rotate(-4deg);
+  }
+  75% {
+    transform: translateY(0.5px) rotate(3deg);
+  }
+}
+
+.ch-block[data-state="failed"],
+.ch-block[data-state="expired"],
+.ch-block[data-state="rejected"] {
+  border-color: var(--ch-border);
+  opacity: 0.55;
+}
+
+.ch-block-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.ch-block-preview {
+  font-size: 0.8125rem;
+  color: var(--ch-muted);
+  line-height: 1.5;
+}
+
+.ch-block-samples {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-size: 0.75rem;
+  color: var(--ch-muted);
+}
+
+.ch-block-status {
+  margin: 0;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ch-muted);
+}
+
+.ch-block-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* ---------- buttons ---------- */
+
+.ch-btn {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 6px 14px;
+  border-radius: var(--ch-radius);
+  border: 1px solid var(--ch-border);
+  background: transparent;
+  color: var(--ch-fg);
+  cursor: pointer;
+}
+
+.ch-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ch-btn--confirm {
+  background: var(--ch-accent);
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-fg);
+}
+
+.ch-btn--confirm:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.ch-btn--reject:not(:disabled):hover {
+  border-color: var(--ch-fg);
+}
+
+/* ---------- floating widget ---------- */
+
+.ch-float {
+  position: fixed;
+  z-index: 2147483000;
+  font-family: var(--ch-font);
+}
+
+/*
+ * The launcher is a morphing pill: a 52px circle at rest that widens to
+ * show live agent status (thinking dots, the streaming tail, pending
+ * proposal count) while the panel is closed.
+ */
+.ch-fab {
+  height: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  border-radius: 26px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-bg);
+  color: var(--ch-fg);
+  font-size: 1.6rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: grab;
+  box-shadow: 0 2px 10px rgb(33 29 25 / 0.12);
+  touch-action: none;
+  user-select: none;
+  transition:
+    max-width 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    padding 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.ch-fab > svg {
+  flex-shrink: 0;
+}
+
+.ch-fab--pill {
+  max-width: 300px;
+  padding: 0 16px 0 13px;
+}
+
+.ch-fab--pill[data-status="streaming"],
+.ch-fab--pill[data-status="thinking"] {
+  border-color: var(--ch-accent);
+}
+
+.ch-fab-status {
+  font-size: 0.8125rem;
+  color: var(--ch-fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ch-fab-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ch-accent);
+  animation: ch-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ch-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+.ch-fab[hidden] {
+  display: none;
+}
+
+.ch-fab:hover {
+  border-color: var(--ch-accent);
+  color: var(--ch-accent);
+}
+
+.ch-fab:active {
+  cursor: grabbing;
+}
+
+.ch-fab[aria-expanded="true"] {
+  color: var(--ch-muted);
+  font-size: 1.3rem;
+}
+
+.ch-float-panel {
+  position: absolute;
+  width: 380px;
+  height: 520px;
+  max-height: calc(100vh - 96px);
+  max-width: calc(100vw - 24px);
+  /* Spring out of the launcher corner; the placement classes set the origin. */
+  transform-origin: var(--ch-origin-x, center) var(--ch-origin-y, center);
+  animation: ch-panel-spring 320ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes ch-panel-spring {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ch-float-panel--above { bottom: calc(100% + 12px); --ch-origin-y: bottom; }
+.ch-float-panel--below { top: calc(100% + 12px); --ch-origin-y: top; }
+.ch-float-panel--right { right: 0; --ch-origin-x: right; }
+.ch-float-panel--left { left: 0; --ch-origin-x: left; }
+
+.ch-float-panel .ch-chat {
+  height: 100%;
+  box-shadow: 0 12px 36px rgb(33 29 25 / 0.14);
+}
+
+/* ---------- mobile bottom sheet ---------- */
+
+.ch-float-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(33 29 25 / 0.32);
+  animation: ch-fade-in 200ms ease-out;
+}
+
+@keyframes ch-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.ch-float-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  height: min(85vh, 640px);
+  height: min(85dvh, 640px);
+  background: var(--ch-bg);
+  border: 1px solid var(--ch-border);
+  border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -12px 36px rgb(33 29 25 / 0.18);
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: ch-sheet-in 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes ch-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+.ch-sheet-grip {
+  border: none;
+  background: none;
+  padding: 12px 0 8px;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+
+.ch-sheet-grip:active {
+  cursor: grabbing;
+}
+
+.ch-sheet-grip-bar {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ch-border);
+}
+
+.ch-sheet-grip:hover .ch-sheet-grip-bar {
+  background: var(--ch-muted);
+}
+
+.ch-float-sheet .ch-chat {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+}
+
+/* ---------- motion preferences ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-stage,
+  .ch-flow-turn,
+  .ch-float-panel,
+  .ch-float-backdrop,
+  .ch-float-sheet {
+    animation: none;
+  }
+
+  .ch-fab {
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+
+  /* Overrides the inline snap/settle transition set while dragging. */
+  .ch-float-sheet {
+    transition: none !important;
+  }
+
+  .ch-caret,
+  .ch-fab-dot,
+  .ch-dots > span,
+  .ch-block[data-working="true"],
+  .ch-block[data-state="confirmed"],
+  .ch-block-working svg {
+    animation: none;
+  }
+}

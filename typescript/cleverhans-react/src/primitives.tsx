@@ -44,6 +44,7 @@ function Root(
         data-cleverhans-proposal={block.proposal.proposal_id}
         data-action-id={block.proposal.action_id}
         data-state={block.view.state}
+        data-working={block.view.working ? "true" : undefined}
       >
         {children}
       </div>
@@ -99,7 +100,7 @@ function Confirm(props: ButtonProps): ReactNode {
     <button
       type="button"
       data-cleverhans-confirm
-      disabled={disabled ?? view.state !== "validated"}
+      disabled={disabled ?? (view.state !== "validated" || view.working)}
       onClick={(e) => {
         onClick?.(e);
         confirm();
@@ -119,7 +120,7 @@ function Reject(props: ButtonProps & { reason?: string }): ReactNode {
     <button
       type="button"
       data-cleverhans-reject
-      disabled={disabled ?? view.state !== "validated"}
+      disabled={disabled ?? (view.state !== "validated" || view.working)}
       onClick={(e) => {
         onClick?.(e);
         reject(reason);

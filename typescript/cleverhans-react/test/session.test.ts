@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SPEC_VERSION } from "../src/envelope";
 import { AgentSession } from "../src/session";
@@ -13,6 +13,10 @@ function openSession() {
 }
 
 describe("AgentSession", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("sends init first, with the spec version", () => {
     const { transport } = openSession();
 
@@ -108,6 +112,100 @@ describe("AgentSession", () => {
       { type: "confirm_action", proposal_id: "prop-1" },
       { type: "reject_action", proposal_id: "prop-2", reason: "changed my mind" },
     ]);
+  });
+
+  it("confirm marks the proposal working until the state change lands", () => {
+    const { transport, session } = openSession();
+    transport.emit(proposalEvent("prop-1"));
+
+    session.confirm("prop-1");
+    expect(session.getSnapshot().proposals[0]).toMatchObject({
+      state: "validated",
+      working: true,
+    });
+
+    transport.emit({ type: "proposal_state_changed", proposal_id: "prop-1", state: "executed" });
+    expect(session.getSnapshot().proposals[0]).toMatchObject({
+      state: "executed",
+      working: false,
+    });
+  });
+
+  it("a working proposal reverts to actionable when the server never answers", () => {
+    vi.useFakeTimers();
+    const { transport, session } = openSession();
+    transport.emit(proposalEvent("prop-1"));
+    session.confirm("prop-1");
+    expect(session.getSnapshot().proposals[0]?.working).toBe(true);
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(session.getSnapshot().proposals[0]).toMatchObject({
+      state: "validated",
+      working: false,
+    });
+  });
+
+  it("a server answer within the window cancels the working timeout", () => {
+    vi.useFakeTimers();
+    const { transport, session } = openSession();
+    transport.emit(proposalEvent("prop-1"));
+    session.confirm("prop-1");
+    transport.emit({ type: "proposal_state_changed", proposal_id: "prop-1", state: "executed" });
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(session.getSnapshot().proposals[0]).toMatchObject({
+      state: "executed",
+      working: false,
+    });
+  });
+
+  it("proposals anchor to the user turn they answered", () => {
+    const { transport, session } = openSession();
+    transport.emit(proposalEvent("prop-0"));
+    session.sendMessage("first");
+    transport.emit(proposalEvent("prop-1"));
+    session.sendMessage("second");
+    transport.emit(proposalEvent("prop-2"));
+
+    const [before, first, second] = session.getSnapshot().proposals;
+    expect(before?.turnId).toBeNull();
+    expect(first?.turnId).toBe("c-1");
+    expect(second?.turnId).toBe("c-2");
+  });
+
+  it("busy walks thinking → streaming → idle across a turn", () => {
+    const { transport, session } = openSession();
+    expect(session.getSnapshot().busy).toBe("idle");
+
+    session.sendMessage("rename this");
+    expect(session.getSnapshot().busy).toBe("thinking");
+
+    transport.emit({ type: "chat_message", msg_id: "m-1", text: "Sure", done: false });
+    expect(session.getSnapshot().busy).toBe("streaming");
+
+    transport.emit({ type: "chat_message", msg_id: "m-1", text: "Sure thing.", done: true });
+    expect(session.getSnapshot().busy).toBe("idle");
+  });
+
+  it("a proposal arriving without chat text also clears thinking", () => {
+    const { transport, session } = openSession();
+    session.sendMessage("rename this");
+
+    transport.emit(proposalEvent("prop-1"));
+
+    expect(session.getSnapshot().busy).toBe("idle");
+  });
+
+  it("a stream error aborts any in-flight assistant message", () => {
+    const { transport, session } = openSession();
+    session.sendMessage("rename this");
+    transport.emit({ type: "chat_message", msg_id: "m-1", text: "Sur", done: false });
+
+    transport.emit({ type: "error", code: "llm_error", message: "down", recoverable: true });
+
+    expect(session.getSnapshot().busy).toBe("idle");
   });
 
   it("stream errors land in lastError", () => {

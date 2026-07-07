@@ -11,7 +11,7 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["react"]
+    "types": ["react", "node"]
   },
   "include": ["src", "test"]
 }

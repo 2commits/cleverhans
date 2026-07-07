@@ -13,6 +13,7 @@ export {
   type AgentSessionOptions,
   type ChatEntry,
   type ProposalView,
+  type SessionBusyState,
   type SessionError,
   type SessionSnapshot,
 } from "./session";

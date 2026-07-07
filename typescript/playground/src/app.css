@@ -1,0 +1,134 @@
+/* Playground chrome — same paper/ink/chestnut palette as the widget. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fbfaf8;
+  color: #211d19;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.pg {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px 96px;
+  min-height: 100vh;
+}
+
+.pg-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.pg-header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.pg-route {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  color: #8a8378;
+}
+
+.pg-hint {
+  font-size: 0.875rem;
+  color: #8a8378;
+  line-height: 1.6;
+  max-width: 52ch;
+}
+
+.pg-list {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pg-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #e8e3dc;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.pg-card:hover {
+  border-color: #8a5a33;
+  transform: translateY(-1px);
+}
+
+.pg-card-title {
+  font-weight: 600;
+}
+
+.pg-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pg-status {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #e8e3dc;
+}
+
+.pg-status--draft {
+  color: #8a5a33;
+  border-color: #d9c3ae;
+}
+
+.pg-status--published {
+  color: #5f7554;
+  border-color: #c2cdba;
+}
+
+.pg-status--archived {
+  color: #8a8378;
+}
+
+.pg-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: #8a8378;
+}
+
+.pg-back {
+  font: inherit;
+  font-size: 0.875rem;
+  color: #8a5a33;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.pg-back:hover {
+  text-decoration: underline;
+}
+
+.pg-detail h2 {
+  margin: 0 0 8px;
+}
