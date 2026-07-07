@@ -380,6 +380,82 @@ async fn exhausted_retries_decline_conversationally() {
     assert_eq!(recorded.len(), 2, "retry budget of 1 means exactly 2 calls");
 }
 
+/// Registry with one action whose only param is context-sourced — paired
+/// with [`NoContextParams`], every proposal fails resolution.
+fn context_param_registry() -> Registry<User> {
+    Registry::builder()
+        .block(BlockDef {
+            block_type: "confirm".to_owned(),
+            slots: vec![],
+        })
+        .action(
+            ActionDef {
+                id: "doc.touch".to_owned(),
+                description: "Touch the selected document".to_owned(),
+                params: vec![ParamSpec {
+                    name: "documentId".to_owned(),
+                    description: String::new(),
+                    ty: ValueType::String,
+                    source: ParamSource::Context,
+                    required: true,
+                }],
+                block_type: "confirm".to_owned(),
+                mutates: false,
+                authz_key: "doc.touch".to_owned(),
+            },
+            Arc::new(OkHandler),
+            None,
+            None,
+        )
+        .build()
+        .expect("valid registry")
+}
+
+#[tokio::test]
+async fn unresolved_context_param_feedback_frames_the_failure_as_momentary() {
+    let (llm, requests) = RecordingLlm::scripted(vec![
+        vec![CompletionItem::ToolCall {
+            name: "doc.touch".to_owned(),
+            arguments: JsonMap::new(),
+        }],
+        vec![CompletionItem::Text("understood".to_owned())],
+    ]);
+    let agent = Agent::with_config(
+        Arc::new(context_param_registry()),
+        Arc::new(llm),
+        Arc::new(FlagAuthz),
+        Arc::new(NoContextParams),
+        AgentConfig::default(),
+    );
+    let mut session = Session::new(User { allowed: true });
+
+    // Turn 1: the resolution miss declines without spending retries.
+    let events = send_message(&agent, &mut session).await;
+    assert!(
+        matches!(&events[..], [ServerEvent::ChatMessage { text, .. }] if text.contains("documentId")),
+        "unresolved context param must decline, got {events:?}"
+    );
+
+    // Turn 2: the model must see guidance that the miss was momentary, not
+    // the generic fix-your-arguments advice.
+    send_message(&agent, &mut session).await;
+    let recorded = requests.lock().expect("lock");
+    let tool_turn = recorded[1]
+        .messages
+        .iter()
+        .rev()
+        .find(|turn| turn.role == ChatRole::Tool)
+        .expect("second request carries the failure tool turn");
+    assert!(
+        tool_turn.content.contains("once the user navigates"),
+        "guidance must frame the failure as momentary, got {tool_turn:?}"
+    );
+    assert!(
+        !tool_turn.content.contains("arguments matching their schema"),
+        "context misses must not get schema advice, got {tool_turn:?}"
+    );
+}
+
 #[tokio::test]
 async fn unauthorized_failure_never_retries() {
     let (agent, requests) = agent(vec![good_call()], AgentConfig::default());
