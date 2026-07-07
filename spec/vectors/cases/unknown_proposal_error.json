@@ -1,0 +1,20 @@
+{
+  "name": "unknown_proposal_error",
+  "description": "Confirming a proposal ID the session does not track is answered with an error and executes nothing.",
+  "spec": ["7.3"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "confirm_action", "proposal_id": "prop-999" } },
+    { "expect": [
+      { "type": "error", "code": "unknown_proposal", "recoverable": true }
+    ] }
+  ],
+  "executions": []
+}

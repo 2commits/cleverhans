@@ -1,0 +1,38 @@
+{
+  "name": "confirm_flow_executes",
+  "description": "Appendix A happy path: a user message yields a validated proposal with a permission-correct preview; explicit confirm triggers revalidation and executes the handler exactly once with the framework-filled context param.",
+  "spec": ["6.2", "6.4", "7.1", "7.3", "12.3", "12.4", "12.5"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581", "view_type": "detail" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal",
+        "proposal_id": { "$bind": "P" },
+        "action_id": "transaction.coBuyer.remove",
+        "params": { "$exact": { "transactionId": "tx_581" } },
+        "block_type": "confirm",
+        "slots": { "title": "Remove co-buyer",
+                   "detail": "Remove co-buyer Jane Doe from TX-581" },
+        "preview": { "affected_count": 1, "sample_ids": { "$exact": ["cb_112"] } } }
+    ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed",
+        "proposal_id": { "$ref": "P" },
+        "state": "executed",
+        "result": { "$exact": { "removed": true } } }
+    ] }
+  ],
+  "executions": [
+    { "action_id": "transaction.coBuyer.remove", "params": { "transactionId": "tx_581" } }
+  ]
+}

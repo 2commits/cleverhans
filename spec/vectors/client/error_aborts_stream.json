@@ -1,0 +1,14 @@
+{
+  "name": "error_aborts_stream",
+  "description": "A stream error aborts any in-flight assistant message (busy returns to idle) and surfaces as the session's last error.",
+  "spec": ["6.3"],
+  "steps": [
+    { "client": { "send_message": "hi" } },
+    { "server": { "type": "chat_message", "msg_id": "m-1", "text": "He", "done": false } },
+    { "assert": { "busy": "streaming" } },
+    { "server": { "type": "error", "code": "llm_error",
+                  "message": "provider unavailable", "recoverable": true } },
+    { "assert": { "busy": "idle",
+                  "last_error": { "code": "llm_error", "recoverable": true } } }
+  ]
+}

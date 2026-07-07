@@ -1,0 +1,22 @@
+{
+  "name": "proposal_wire_shape",
+  "description": "The proposal message carries exactly the spec §6.4 field list in snake_case, with the preview present because the action mutates.",
+  "spec": ["6.4"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "$keys": ["type", "proposal_id", "action_id", "params", "block_type",
+                   "slots", "preview", "context_seq", "turn_msg_id"] }
+    ] }
+  ]
+}

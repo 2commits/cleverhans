@@ -1,0 +1,25 @@
+{
+  "name": "model_writes_context_param",
+  "description": "A tool call that tries to set a context-sourced param (the record identity) is invalid and never renders; the failure is model-fixable, so the scripted retry turn answers in text. The framework, never the model, fills context params.",
+  "spec": ["4.1", "7.1", "12.5"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove",
+                        "arguments": { "transactionId": "tx_evil" } } } ],
+    [ { "text": "I can only act on the transaction you have open." } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer from tx_evil", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "chat_message", "done": true,
+        "text": "I can only act on the transaction you have open." }
+    ] }
+  ],
+  "executions": []
+}

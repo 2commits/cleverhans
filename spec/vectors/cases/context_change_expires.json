@@ -1,0 +1,27 @@
+{
+  "name": "context_change_expires",
+  "description": "A context update that changes the route expires the pending proposal (spec §7.4 SHOULD); confirm-time revalidation remains the backstop either way.",
+  "spec": ["6.2", "7.4"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal", "proposal_id": { "$bind": "P" } }
+    ] },
+    { "send": { "type": "context_update", "context_seq": 8,
+                "context": { "route": "/transactions" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" }, "state": "expired" }
+    ] }
+  ],
+  "executions": []
+}
