@@ -21,7 +21,11 @@ fn load_json_files<T: serde::de::DeserializeOwned>(sub: &str) -> Vec<(String, T)
     entries
         .into_iter()
         .map(|path| {
-            let name = path.file_stem().expect("file stem").to_string_lossy().into_owned();
+            let name = path
+                .file_stem()
+                .expect("file stem")
+                .to_string_lossy()
+                .into_owned();
             let json = std::fs::read_to_string(&path)
                 .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
             let value = serde_json::from_str(&json)
@@ -47,9 +51,12 @@ async fn every_vector_passes() {
             &vector.name, file,
             "vector name must match its file stem: {file}"
         );
-        let fixture = fixtures
-            .get(&vector.fixture)
-            .unwrap_or_else(|| panic!("vector `{}` names unknown fixture `{}`", file, vector.fixture));
+        let fixture = fixtures.get(&vector.fixture).unwrap_or_else(|| {
+            panic!(
+                "vector `{}` names unknown fixture `{}`",
+                file, vector.fixture
+            )
+        });
         match run_vector(fixture, vector).await {
             Ok(()) => report.push(format!("[PASS] {file}")),
             Err(err) => {

@@ -47,7 +47,10 @@ fn literal_union(out: &mut String, name: &str, ids: &[String]) {
         let _ = writeln!(
             out,
             "{name} = Literal[{}]",
-            ids.iter().map(|id| py_str(id)).collect::<Vec<_>>().join(", ")
+            ids.iter()
+                .map(|id| py_str(id))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
 }

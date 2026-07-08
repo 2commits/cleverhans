@@ -26,13 +26,20 @@ use cleverhans_core::seams::{
     ActionHandler, AuthzDecision, AuthzResolver, CompletionItem, CompletionRequest, DryRunHandler,
     LlmProvider,
 };
-use cleverhans_ffi::{DeclarativeSlots, FfiPrincipal, FramePump, LlmSpec, assemble_registry, build_llm};
+use cleverhans_ffi::{
+    DeclarativeSlots, FfiPrincipal, FramePump, LlmSpec, assemble_registry, build_llm,
+};
 
 /// A host callback receiving `(payload_a, payload_b)` JSON values and
 /// resolving to a JSON value. The TS wrapper guarantees the callback is
 /// async (sync throws become rejections there).
-type HostFn =
-    ThreadsafeFunction<FnArgs<(Value, Value)>, Promise<Value>, FnArgs<(Value, Value)>, Status, false>;
+type HostFn = ThreadsafeFunction<
+    FnArgs<(Value, Value)>,
+    Promise<Value>,
+    FnArgs<(Value, Value)>,
+    Status,
+    false,
+>;
 /// Authorization callback: `(principal, action_id, params)`.
 type AuthzFn = ThreadsafeFunction<
     FnArgs<(Value, String, Value)>,
@@ -73,7 +80,11 @@ fn handler_outcome(value: Value) -> std::result::Result<Value, HandlerError> {
     }
 }
 
-async fn call_host(callable: &HostFn, a: Value, b: Value) -> std::result::Result<Value, HandlerError> {
+async fn call_host(
+    callable: &HostFn,
+    a: Value,
+    b: Value,
+) -> std::result::Result<Value, HandlerError> {
     let promise = callable
         .call_async((a, b).into())
         .await
@@ -133,7 +144,14 @@ impl AuthzResolver<FfiPrincipal> for JsAuthz {
     ) -> AuthzDecision {
         let outcome = async {
             self.0
-                .call_async((principal.clone(), action_id.to_owned(), Value::Object(params.clone())).into())
+                .call_async(
+                    (
+                        principal.clone(),
+                        action_id.to_owned(),
+                        Value::Object(params.clone()),
+                    )
+                        .into(),
+                )
                 .await?
                 .await
         }
@@ -167,9 +185,12 @@ struct JsLlm(HostFn);
 
 #[async_trait::async_trait]
 impl LlmProvider for JsLlm {
-    async fn complete(&self, request: CompletionRequest) -> std::result::Result<Vec<CompletionItem>, LlmError> {
-        let request = serde_json::to_value(&request)
-            .map_err(|err| LlmError::Provider(err.to_string()))?;
+    async fn complete(
+        &self,
+        request: CompletionRequest,
+    ) -> std::result::Result<Vec<CompletionItem>, LlmError> {
+        let request =
+            serde_json::to_value(&request).map_err(|err| LlmError::Provider(err.to_string()))?;
         let value = call_host(&self.0, request, Value::Null)
             .await
             .map_err(|err| LlmError::Provider(err.to_string()))?;
@@ -209,11 +230,21 @@ impl Agent {
 
         let handlers = handlers
             .into_iter()
-            .map(|(id, callable)| (id, Arc::new(JsHandler(callable)) as Arc<dyn ActionHandler<FfiPrincipal>>))
+            .map(|(id, callable)| {
+                (
+                    id,
+                    Arc::new(JsHandler(callable)) as Arc<dyn ActionHandler<FfiPrincipal>>,
+                )
+            })
             .collect();
         let dry_runs = dry_runs
             .into_iter()
-            .map(|(id, callable)| (id, Arc::new(JsDryRun(callable)) as Arc<dyn DryRunHandler<FfiPrincipal>>))
+            .map(|(id, callable)| {
+                (
+                    id,
+                    Arc::new(JsDryRun(callable)) as Arc<dyn DryRunHandler<FfiPrincipal>>,
+                )
+            })
             .collect();
 
         let authz: Arc<dyn AuthzResolver<FfiPrincipal>> = match authorize {
@@ -238,7 +269,10 @@ impl Agent {
             .map(|(id, table)| {
                 let slots: DeclarativeSlots = serde_json::from_value(table)
                     .map_err(|err| invalid(format!("slotBuilders[{id}]: {err}")))?;
-                Ok((id, Arc::new(slots) as Arc<dyn cleverhans_core::seams::SlotBuilder>))
+                Ok((
+                    id,
+                    Arc::new(slots) as Arc<dyn cleverhans_core::seams::SlotBuilder>,
+                ))
             })
             .collect::<Result<HashMap<_, _>>>()?;
         let context_resolver = schema.context_resolver();

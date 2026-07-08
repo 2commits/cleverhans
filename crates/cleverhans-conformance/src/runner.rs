@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use cleverhans_core::envelope::ClientEvent;
-use cleverhans_ws_core::{FramePump, FrameOutcome};
+use cleverhans_ws_core::{FrameOutcome, FramePump};
 
 use crate::fixture::{Fixture, Frame, Layer, Step, Vector, VectorPrincipal, build_agent};
 use crate::matcher::{Bindings, match_events, substitute};
@@ -101,9 +101,8 @@ async fn run_binding_layer(fixture: &Fixture, vector: &Vector) -> Result<(), Str
     }
     let mut actual = Vec::new();
     for json in raw_events {
-        actual.push(
-            serde_json::from_str(&json).map_err(|err| format!("outbound not JSON: {err}"))?,
-        );
+        actual
+            .push(serde_json::from_str(&json).map_err(|err| format!("outbound not JSON: {err}"))?);
     }
 
     let actual = normalize(actual, vector);

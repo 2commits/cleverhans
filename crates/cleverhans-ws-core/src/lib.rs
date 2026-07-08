@@ -120,7 +120,9 @@ impl<P: Send + Sync> FramePump<P> {
             Ok(event) => event,
             Err(err) => {
                 tracing::warn!(error = %err, "malformed client frame");
-                let alive = sink.emit(error_json("malformed_event", &err.to_string(), true)).await;
+                let alive = sink
+                    .emit(error_json("malformed_event", &err.to_string(), true))
+                    .await;
                 return if alive {
                     FrameOutcome::Continue
                 } else {

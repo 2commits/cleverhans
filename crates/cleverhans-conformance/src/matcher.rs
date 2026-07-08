@@ -164,7 +164,9 @@ fn match_directive(
             if bound == actual {
                 Ok(())
             } else {
-                Err(format!("{path}: expected bound `{name}` = {bound}, got {actual}"))
+                Err(format!(
+                    "{path}: expected bound `{name}` = {bound}, got {actual}"
+                ))
             }
         }
         "$exact" => {

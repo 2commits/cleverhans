@@ -149,7 +149,8 @@ impl AuthzResolver<FfiPrincipal> for PyAuthz {
         action_id: &str,
         params: &JsonMap,
     ) -> AuthzDecision {
-        let (principal, action_id, params) = (principal.clone(), action_id.to_owned(), params.clone());
+        let (principal, action_id, params) =
+            (principal.clone(), action_id.to_owned(), params.clone());
         let out = call_host(&self.0, move |py| {
             Ok(vec![
                 to_py_json(py, &principal)?,
@@ -205,7 +206,12 @@ struct PyContextResolver {
 }
 
 impl ContextParamResolver for PyContextResolver {
-    fn resolve(&self, action_id: &str, param: &ParamSpec, context: &Context) -> Option<serde_json::Value> {
+    fn resolve(
+        &self,
+        action_id: &str,
+        param: &ParamSpec,
+        context: &Context,
+    ) -> Option<serde_json::Value> {
         let resolved = Python::attach(|py| -> PyResult<Option<serde_json::Value>> {
             let out = self.callable.bind(py).call1((
                 action_id,
@@ -327,10 +333,11 @@ impl PyAgent {
                     (id, Arc::new(dry_run) as _)
                 })
                 .collect();
-        let slot_builders: HashMap<String, Arc<dyn SlotBuilder>> = collect_callables(slot_builders)?
-            .into_iter()
-            .map(|(id, callable)| (id, Arc::new(PySlots(callable)) as _))
-            .collect();
+        let slot_builders: HashMap<String, Arc<dyn SlotBuilder>> =
+            collect_callables(slot_builders)?
+                .into_iter()
+                .map(|(id, callable)| (id, Arc::new(PySlots(callable)) as _))
+                .collect();
 
         let context_resolver: Arc<dyn ContextParamResolver> = match resolve_context_param {
             Some(callable) => Arc::new(PyContextResolver {
@@ -356,8 +363,8 @@ impl PyAgent {
             None => AgentConfig::default(),
         };
 
-        let registry = assemble_registry(schema, handlers, dry_runs, slot_builders)
-            .map_err(value_err)?;
+        let registry =
+            assemble_registry(schema, handlers, dry_runs, slot_builders).map_err(value_err)?;
         Ok(Self {
             inner: Arc::new(Agent::with_config(
                 Arc::new(registry),
@@ -418,20 +425,19 @@ impl PySession {
                 let agent = Arc::clone(&self.agent);
                 let principal = self.principal.clone();
                 let closed = Arc::clone(&self.closed);
-                pyo3_async_runtimes::tokio::get_runtime().spawn(
-                    pyo3_async_runtimes::tokio::scope(locals, async move {
+                pyo3_async_runtimes::tokio::get_runtime().spawn(pyo3_async_runtimes::tokio::scope(
+                    locals,
+                    async move {
                         let mut pump = cleverhans_ffi::FramePump::new(principal);
                         while let Some(turn) = turns_rx.recv().await {
                             let mut events = turn.events;
-                            let outcome = pump
-                                .handle_frame(&agent, &turn.frame, &mut events)
-                                .await;
+                            let outcome = pump.handle_frame(&agent, &turn.frame, &mut events).await;
                             if outcome == cleverhans_ffi::FrameOutcome::Closed {
                                 closed.store(true, std::sync::atomic::Ordering::SeqCst);
                             }
                         }
-                    }),
-                );
+                    },
+                ));
                 *worker = Some(turns_tx.clone());
                 turns_tx
             }

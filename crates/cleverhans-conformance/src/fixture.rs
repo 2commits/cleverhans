@@ -328,10 +328,13 @@ impl ActionHandler<VectorPrincipal> for ScriptedHandler {
         params: &JsonMap,
         _principal: &VectorPrincipal,
     ) -> Result<Value, HandlerError> {
-        self.log.lock().expect("execution log lock").push(ExecutionExpectation {
-            action_id: self.action_id.clone(),
-            params: params.clone(),
-        });
+        self.log
+            .lock()
+            .expect("execution log lock")
+            .push(ExecutionExpectation {
+                action_id: self.action_id.clone(),
+                params: params.clone(),
+            });
         match &self.script {
             HandlerScript::Return(value) => Ok(value.clone()),
             HandlerScript::Fail(message) => Err(HandlerError::Rejected(message.clone())),
@@ -397,7 +400,10 @@ impl SlotBuilder for DeclarativeSlots {
 /// On fixture-authoring errors (action without a script entry, invalid
 /// registry) — loud failure is the point.
 #[must_use]
-pub fn build_agent(fixture: &Fixture, vector: &Vector) -> (Arc<Agent<VectorPrincipal>>, ExecutionLog) {
+pub fn build_agent(
+    fixture: &Fixture,
+    vector: &Vector,
+) -> (Arc<Agent<VectorPrincipal>>, ExecutionLog) {
     let log: ExecutionLog = Arc::new(Mutex::new(Vec::new()));
     let mut builder = RegistryBuilder::from_schema(fixture.registry.clone());
     for def in &fixture.registry.actions {
@@ -418,9 +424,10 @@ pub fn build_agent(fixture: &Fixture, vector: &Vector) -> (Arc<Agent<VectorPrinc
                     calls: AtomicUsize::new(0),
                 }) as Arc<dyn DryRunHandler<VectorPrincipal>>
             }),
-            script.slots.clone().map(|slots| {
-                Arc::new(DeclarativeSlots(slots)) as Arc<dyn SlotBuilder>
-            }),
+            script
+                .slots
+                .clone()
+                .map(|slots| Arc::new(DeclarativeSlots(slots)) as Arc<dyn SlotBuilder>),
         );
     }
     let registry = builder.build().expect("fixture registry is valid");

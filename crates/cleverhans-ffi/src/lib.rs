@@ -162,7 +162,12 @@ pub fn assemble_registry(
                 def.id
             )));
         }
-        builder = builder.attach(def.id.clone(), handler, dry_run, slot_builders.remove(&def.id));
+        builder = builder.attach(
+            def.id.clone(),
+            handler,
+            dry_run,
+            slot_builders.remove(&def.id),
+        );
     }
     for (maps, name) in [
         (handlers.keys().next(), "handlers"),
@@ -311,7 +316,8 @@ mod tests {
         assert_eq!(events[0]["type"], "action_proposal", "got {events:?}");
         assert_eq!(events[1]["state"], "executed");
         assert_eq!(
-            events[1]["result"], json!({"as": "alex"}),
+            events[1]["result"],
+            json!({"as": "alex"}),
             "handler saw the JSON principal"
         );
     }

@@ -262,7 +262,12 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_context_paths() {
-        for bad in ["selected_record", "selected_record_id.foo", "params.", "para.x"] {
+        for bad in [
+            "selected_record",
+            "selected_record_id.foo",
+            "params.",
+            "para.x",
+        ] {
             let doc = document().replace("\"selected_record_id\"", &format!("\"{bad}\""));
 
             assert!(

@@ -389,11 +389,7 @@ impl<P> RegistryBuilder<P> {
         // invariant checks below (incl. mutates ⇒ dry_run) cover both the
         // programmatic and the declarative path.
         for attachment in self.attachments {
-            let Some(at) = self
-                .pending
-                .iter()
-                .position(|def| def.id == attachment.id)
-            else {
+            let Some(at) = self.pending.iter().position(|def| def.id == attachment.id) else {
                 let attached_before = self.actions.iter().any(|reg| reg.def.id == attachment.id);
                 return Err(if attached_before {
                     RegistryError::DuplicateAttachment(attachment.id)
@@ -570,7 +566,12 @@ mod tests {
         #[test]
         fn attached_schema_builds_and_round_trips() {
             let registry = RegistryBuilder::from_schema(schema())
-                .attach("a.b", Arc::new(NoopHandler), Some(Arc::new(NoopDryRun)), None)
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
                 .build()
                 .expect("valid registry");
 
@@ -587,7 +588,12 @@ mod tests {
         #[test]
         fn attach_for_undeclared_action_fails_build() {
             let result = RegistryBuilder::from_schema(schema())
-                .attach("a.b", Arc::new(NoopHandler), Some(Arc::new(NoopDryRun)), None)
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
                 .attach("no.such", Arc::new(NoopHandler), None, None)
                 .build();
 
@@ -597,8 +603,18 @@ mod tests {
         #[test]
         fn double_attach_fails_build() {
             let result = RegistryBuilder::from_schema(schema())
-                .attach("a.b", Arc::new(NoopHandler), Some(Arc::new(NoopDryRun)), None)
-                .attach("a.b", Arc::new(NoopHandler), Some(Arc::new(NoopDryRun)), None)
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
                 .build();
 
             assert!(matches!(result, Err(RegistryError::DuplicateAttachment(id)) if id == "a.b"));
