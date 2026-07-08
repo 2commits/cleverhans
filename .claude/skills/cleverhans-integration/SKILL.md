@@ -9,155 +9,178 @@ CleverHans is propose-only: the agent **never executes**. It proposes actions ag
 
 Spec version: `cleverhans_core::SPEC_VERSION = "0.1"`. Proposal lifecycle: `Proposed → {Invalid, Validated}`, `Validated → {Confirmed, Rejected, Expired}`, `Confirmed → {Executed, Failed, Expired}`. External code observes states; only `ProposalStore::confirm` can mint a `ConfirmedProposal` (non-Clone confirmation witness).
 
+Repo layout: Rust crates in `crates/`, TypeScript packages in `typescript/`, Python in `python/`. Canonical end-to-end wiring: `crates/cleverhans-demo/` (Rust) and `typescript/playground/src/App.tsx` (TS).
+
 ## Rust backend
 
-Crates (workspace members, dep names as-is): `cleverhans-core`, `cleverhans-ws` (+ framework-neutral `cleverhans-ws-core`), `cleverhans-llm-anthropic`, `cleverhans-llm-ollama`, `cleverhans-evals`, `cleverhans-grpc` (alt transport), `cleverhans-codegen` (registry → TS types). Canonical end-to-end wiring: `crates/cleverhans-demo/src/main.rs` and `crates/cleverhans-demo/src/registry.rs`.
+**Use the `cleverhans` facade crate** — one dependency, one prelude, instead of wiring the sub-crates by hand:
 
-### 1. Define the registry
+```toml
+[dependencies]
+cleverhans = { version = "0.1", features = ["ws", "anthropic"] }  # or "ollama", "evals"
 
-Everything is generic over your app's principal type `P` (e.g. `DemoUser`).
-
-```rust
-use cleverhans_core::registry::*;
-use cleverhans_core::seams::static_slots;
-use cleverhans_core::slots;
-
-let registry = Registry::<MyUser>::builder()
-    .block(BlockDef {
-        block_type: "confirm".into(),
-        slots: vec![
-            SlotSpec { name: "title".into(), ty: ValueType::String, required: true },
-            SlotSpec { name: "detail".into(), ty: ValueType::String, required: false },
-        ],
-    })
-    .action(
-        ActionDef {
-            id: "document.rename".into(),
-            description: "Rename the currently selected document".into(),
-            params: vec![
-                ParamSpec { name: "documentId".into(), description: "...".into(),
-                            ty: ValueType::String, source: ParamSource::Context, required: true },
-                ParamSpec { name: "title".into(), description: "New title".into(),
-                            ty: ValueType::String, source: ParamSource::Utterance, required: true },
-            ],
-            block_type: "confirm".into(),
-            mutates: true,
-            authz_key: "documents.write".into(),
-        },
-        Arc::new(RenameHandler),          // ActionHandler<P>
-        Some(Arc::new(RenameDryRun)),     // DryRunHandler<P> — REQUIRED when mutates: true
-        Some(Arc::new(|params: &cleverhans_core::JsonMap, _preview: Option<&DryRunPreview>| slots! {
-            "title": "Rename document",
-            "detail": format!("New title: {}", params["title"]),
-        })),
-    )
-    .build()?; // errors: DuplicateAction, DuplicateBlock, UnknownBlockType, MissingDryRun
+[dev-dependencies]
+cleverhans = { version = "0.1", features = ["test-util"] }
 ```
 
-Key rules:
-- `ParamSource::Context` params are filled by the framework via your `ContextParamResolver` — the model never sees or writes them. `ParamSource::Utterance` params are the only ones exposed in `Registry::tool_defs()`.
-- Every `mutates: true` action must supply a dry-run handler; `.build()` rejects otherwise.
-- Slot builders: closures implement `SlotBuilder` directly (blanket impl); use `static_slots(slots! { ... })` for fixed cards. The `slots!` macro takes `json!`-object syntax.
+```rust
+use cleverhans::prelude::*; // Registry, seams traits, Agent, slots!, agent_router*, providers, typed_handler…
+```
+
+Features: `ws` (axum binding), `anthropic` / `ollama` (providers + `llm::from_env`), `evals` (eval harness), `test-util` (offline test doubles). The core protocol is always present. The sub-crates (`cleverhans-core`, `cleverhans-ws`, `cleverhans-llm-*`, `cleverhans-evals`, `cleverhans-codegen`, `cleverhans-conformance`, `cleverhans-grpc`, `cleverhans-ffi`, `cleverhans-py`, `cleverhans-node`) still exist if you need one directly.
+
+### 1. Author the registry as a document
+
+The wire-visible registry (blocks, actions, params, context mappings — everything except handlers) is a versioned JSON document, `registry.json`. It is the single source of truth: the backend loads it, the codegen CLI reads it, conformance fixtures share it. Example entry:
+
+```json
+{
+  "spec_version": "0.1",
+  "blocks": [
+    { "block_type": "confirm", "slots": [
+      { "name": "title", "type": "string", "required": true },
+      { "name": "detail", "type": "string", "required": false }
+    ]}
+  ],
+  "actions": [
+    { "id": "document.rename", "description": "Rename the selected document",
+      "params": [
+        { "name": "documentId", "type": "string", "source": "context", "required": true },
+        { "name": "title", "type": "string", "source": "utterance", "required": true }
+      ],
+      "block_type": "confirm", "mutates": true, "authz_key": "documents.write" }
+  ],
+  "context_params": { "documentId": "selected_record_id" }
+}
+```
+
+- `source: "context"` params are filled by the framework from `context_params` (a param → context-path map: `route`, `selected_record_id`, `view_type`, `params.<key>`, `extensions.<key>`); the model never sees or writes them. `source: "utterance"` params are the only ones exposed to the model.
+- Every `mutates: true` action must have a dry-run handler; `.build()` rejects otherwise. A non-mutating action with a dry-run is also rejected.
 - Avoid `__` in action ids — LLM providers mangle `.` → `__` for tool-name rules.
 
-### 2. Implement the seams (`cleverhans_core::seams`)
+Building programmatically instead (`Registry::builder().block(...).action(...)`) is still supported and interchangeable — `.context_param(name, path)` sets the mapping.
 
-```rust
-#[async_trait]
-impl ActionHandler<MyUser> for RenameHandler {
-    async fn execute(&self, params: &JsonMap, principal: &MyUser)
-        -> Result<serde_json::Value, HandlerError> { /* app's own authorized path */ }
-}
-#[async_trait]
-impl DryRunHandler<MyUser> for RenameDryRun {
-    async fn dry_run(&self, params: &JsonMap, principal: &MyUser)
-        -> Result<DryRunPreview, HandlerError> { /* affected_count, sample_ids, summary */ }
-}
-#[async_trait]
-impl AuthzResolver<MyUser> for MyAuthz {
-    async fn authorize(&self, principal: &MyUser, action_id: &str, params: &JsonMap)
-        -> AuthzDecision { AuthzDecision::Allow /* or Deny(reason) */ }
-}
-impl ContextParamResolver for SelectionResolver {  // sync, not generic
-    fn resolve(&self, action_id: &str, param: &ParamSpec, context: &Context)
-        -> Option<serde_json::Value> {
-        (param.name == "documentId")
-            .then(|| context.selected_record_id.clone().map(Into::into)).flatten()
-    }
-}
+### 2. Generate typed bindings (kills stringly-typed drift)
+
+`cleverhans-codegen` emits typed modules from `registry.json` — one source, three consumers:
+
+```sh
+cargo run -p cleverhans-codegen -- --schema registry.json \
+  --rs src/generated.rs --ts app/generated/registry.ts --py generated/registry.py
 ```
 
-Validation order (runs at propose AND confirm time): existence → param fill + typecheck (context via resolver; unknown params and model writes to context params rejected) → authz → dry-run (iff mutates) → slot build → slot check. `ValidationFailure::is_model_fixable()` gates agent retries.
+The Rust module (`--rs`) gives you `action_ids::DOCUMENT_RENAME` constants (typo'd `attach` id → compile error) and per-action params structs like `DocumentRenameParams` (serde `Deserialize`, `deny_unknown_fields`, string-enum params become generated enums). Pin freshness with a golden test comparing `rust_module(&schema.actions, &schema.blocks)` against the committed file.
 
-### 3. Pick an LLM provider
+### 3. Attach handlers — three styles, pick per action
+
+Load the document, bind handlers by id, build:
 
 ```rust
-// Anthropic (DEFAULT_MODEL = "claude-opus-4-8"):
-let mut cfg = AnthropicConfig::new(std::env::var("ANTHROPIC_API_KEY")?);
-if let Ok(m) = std::env::var("ANTHROPIC_MODEL") { cfg.model = m; }  // model override
-let llm: Arc<dyn LlmProvider> = Arc::new(AnthropicProvider::new(cfg));
+use cleverhans::prelude::*;
+use crate::generated::{DocumentRenameParams, action_ids};
 
-// Ollama (zero egress, no credential):
+let schema = RegistrySchema::from_json(include_str!("../registry.json"))?;
+let registry = RegistryBuilder::from_schema(schema)
+    // (a) typed closure over codegen params — no JSON digging:
+    .attach(action_ids::DOCUMENT_RENAME,
+        typed_handler(move |p: DocumentRenameParams, _user: MyUser| async move {
+            Ok(serde_json::json!({ "id": p.document_id, "title": p.title }))
+        }),
+        Some(typed_dry_run(move |p: DocumentRenameParams, _user: MyUser| async move {
+            Ok(DryRunPreview { affected_count: 1, ..Default::default() })
+        })),
+        Some(Arc::new(|params: &JsonMap, _: Option<&DryRunPreview>| slots! {
+            "title": "Rename document",
+        })))
+    // (b) plain closure over the raw JsonMap:
+    .attach(action_ids::DOCUMENT_PUBLISH,
+        Arc::new(|params: JsonMap, _user: MyUser| async move { Ok(serde_json::Value::Null) }),
+        Some(Arc::new(|_: JsonMap, _: MyUser| async move { Ok(DryRunPreview::default()) })),
+        Some(static_slots(slots! { "title": "Publish document" })))
+    // (c) trait impl on a struct — for owned state, or one type serving both seams
+    .attach(action_ids::DOCUMENTS_DELETE_BY_STATUS,
+        Arc::new(DeleteByStatus(store.clone())),
+        Some(Arc::new(DeleteByStatus(store.clone()))),
+        Some(static_slots(slots! { "title": "Bulk delete" })))
+    .build()?;
+```
+
+Closure handlers work via blanket impls (require `P: Clone`); `typed_handler` / `typed_dry_run` wrap a closure over a codegen params struct. Struct impls (`impl ActionHandler<P> for T`) remain for stateful handlers. Slot builders: closures, or `static_slots(slots! { ... })` for fixed cards.
+
+The other two seams:
+- `AuthzResolver<P>::authorize(&self, principal, action_id, params) -> AuthzDecision` (`Allow` / `Deny(reason)`) — called at propose AND confirm time.
+- Context params: use `schema.context_resolver()` (a `MappedContextResolver` over the document's `context_params`) for the common case — **zero app code**. Implement `ContextParamResolver` yourself only for richer needs.
+
+Validation order (propose and confirm time): existence → param fill + typecheck (context via resolver; unknown params and model writes to context params rejected) → authz → dry-run (iff mutates) → slot build → slot check. `ValidationFailure::is_model_fixable()` gates agent retries.
+
+### 4. Pick an LLM provider
+
+`llm::from_env()` is the bootstrap every app was going to copy: `OLLAMA_MODEL` wins, else `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`), else a clear error naming the accepted vars.
+
+```rust
+let llm = cleverhans::llm::from_env()?;
+// or explicitly:
+let llm: Arc<dyn LlmProvider> = Arc::new(AnthropicProvider::new(AnthropicConfig::new(key)));
 let llm: Arc<dyn LlmProvider> = Arc::new(OllamaProvider::new(OllamaConfig::new("qwen3".into())));
 ```
 
 Custom providers implement `LlmProvider::complete` (and optionally `complete_stream`).
 
-### 4. Assemble the agent and mount the WebSocket
+### 5. Assemble the agent and mount the WebSocket
 
 ```rust
 let agent = Arc::new(Agent::with_config(
-    Arc::new(registry), llm, Arc::new(MyAuthz), Arc::new(SelectionResolver),
-    AgentConfig { app_instructions: Some("This app is ...".into()), ..AgentConfig::default() },
+    Arc::new(registry), llm, Arc::new(MyAuthz), Arc::new(schema.context_resolver()),
+    AgentConfig { app_instructions: Some("This app is ...".into()), ..Default::default() },
 ));
-
-// PrincipalExtractor maps HTTP headers → principal at WS upgrade; the framework
-// never constructs a principal itself. Do real auth here.
-struct HeaderAuth;
-impl PrincipalExtractor<MyUser> for HeaderAuth {
-    fn extract(&self, headers: &HeaderMap) -> Result<MyUser, StatusCode> { /* ... */ }
-}
-
-let app = axum::Router::new()
-    .merge(cleverhans_ws::agent_router("/agent", agent, Arc::new(HeaderAuth)));
-axum::serve(listener, app).await?;
 ```
 
-- `AgentConfig`: `app_instructions` (appended to the non-replaceable `DEFAULT_SYSTEM_PROMPT`), `max_validation_retries` (default 2), `describe_context` (default true).
-- One `Session::new(principal)` per authenticated stream; `agent_router` handles this.
-- The session loop enforces init-first: first frame must be `ClientEvent::Init` or the socket closes with `init_required`.
-- Logging is `tracing`-based inside `run_session`; demo filter: `"info,cleverhans_ws=info"`, override with `RUST_LOG`.
-- Non-axum transports: use `cleverhans_ws_core::run_session(agent, principal, inbound_string_stream, tx)` directly, or `cleverhans-grpc`.
+Two router flavors — pick by how the host app authenticates:
 
-### 5. Evals
+```rust
+// (a) Existing tower/axum auth middleware already resolves the caller into
+//     request extensions — reuse it, no second auth path:
+let app = Router::new()
+    .merge(agent_router_from_extension("/agent", agent))
+    .layer(my_auth_layer); // inserts Extension<MyUser>; missing → 401
 
-Cases are a JSON array (`crates/cleverhans-demo/eval-cases.json` is the sample):
+// (b) Header-based auth at upgrade (cookie/bearer): implement PrincipalExtractor:
+let app = Router::new().merge(agent_router("/agent", agent, Arc::new(HeaderAuth)));
+```
+
+The framework never constructs a principal. `AgentConfig`: `app_instructions` (appended to the non-replaceable `DEFAULT_SYSTEM_PROMPT`), `max_validation_retries` (default 2), `describe_context` (default true). On assembly, `Agent` logs the registry it sees via `tracing` (`info`: one line per action + a summary) — enable a subscriber to catch a missing action or wrong block at startup. Non-axum transports: `cleverhans_ws_core::run_session(...)` directly, or `cleverhans-grpc`.
+
+### 6. Test offline, then eval
+
+`test-util` ships `ScriptedLlm` — drive the whole propose→confirm→execute pipeline with the model replaced by a script, no network:
+
+```rust
+use cleverhans::test_util::ScriptedLlm;
+let llm = Arc::new(ScriptedLlm::new([
+    vec![CompletionItem::ToolCall { name: "document.rename".into(), arguments: slots! { "title": "Roadmap" } }],
+    vec![CompletionItem::Text("Renamed.".into())],
+]));
+// pass llm.clone() to Agent; assert on llm.requests() afterward
+```
+
+Eval cases (action-mapping accuracy against a real model) are a JSON array — utterance + context → expected action or decline:
 
 ```json
 [
-  { "name": "rename in detail view",
-    "utterance": "rename this to Roadmap",
+  { "name": "rename in detail view", "utterance": "rename this to Roadmap",
     "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1", "view_type": "detail" },
     "expected": { "kind": "action", "action_id": "document.rename", "params": { "title": "Roadmap" } } },
-  { "name": "off-registry request",
-    "utterance": "email this to the team",
-    "expected": { "kind": "decline" } }
+  { "name": "off-registry", "utterance": "email this", "expected": { "kind": "decline" } }
 ]
 ```
 
-Param match is a subset (context-filled params may be omitted). Programmatic: `cleverhans_evals::{load_cases, run_suite}` → `EvalReport` with `.accuracy()` / `.all_passed()`. CLI:
-
-```sh
-ANTHROPIC_API_KEY=... cargo run -p cleverhans-demo -- eval crates/cleverhans-demo/eval-cases.json
-```
-
-Exits non-zero on any failure. When adding an action, add eval cases covering: happy path, context-dependent targeting (with and without selection), and a decline case near its semantic boundary.
+Param match is a subset. Run: `cargo run -p cleverhans-demo -- eval crates/cleverhans-demo/eval-cases.json` (exits non-zero on any failure). Programmatic: `cleverhans::evals::{load_cases, run_suite}`.
 
 ## TypeScript frontend
 
-Packages: `@cleverhans/react` (headless: session store, hooks, block router, WS transport) and `@cleverhans/ui` (styled `AgentChat` / `FloatingChat` + default blocks). Canonical example: `typescript/playground/src/App.tsx`. Keep TS envelope types in sync with Rust via `cleverhans-codegen` (Rust registry → TS types).
+Packages under `typescript/`: `@cleverhans/react` (headless: session store, hooks, block router, WS transport) and `@cleverhans/ui` (styled `AgentChat` / `FloatingChat` + default blocks). Also `@cleverhans/node` (Node binding). Canonical example: `typescript/playground/src/App.tsx`. Keep TS envelope/registry types in sync via `cleverhans-codegen --ts` (committed to `typescript/playground/src/generated/registry.ts`; freshness is pinned by a Rust test).
 
-### Session setup (framework-agnostic core)
+### Session setup
 
 ```tsx
 import { AgentSession, createWebSocketTransport } from "@cleverhans/react";
@@ -168,7 +191,7 @@ const session = new AgentSession(transport, {
 });
 ```
 
-Create once (e.g. `useMemo`); the app owns the session lifetime. Keep context synced with navigation — the agent targets whatever the context says the user is standing on, and navigation expires pending proposals:
+Create once (`useMemo`); the app owns the lifetime. Keep context synced with navigation — the agent targets whatever the context says the user is standing on, and navigation expires pending proposals:
 
 ```tsx
 useEffect(() => {
@@ -181,11 +204,10 @@ useEffect(() => {
 ```tsx
 import { FloatingChat /* or AgentChat */ } from "@cleverhans/ui";
 import "@cleverhans/ui/styles.css";
-
 <FloatingChat session={session} />
 ```
 
-Default blocks `ConfirmBlock` / `BulkPreviewBlock` (`DEFAULT_BLOCKS`) render the demo registry's block types; pass custom `BlockComponents` for app-specific block types.
+Default blocks `ConfirmBlock` / `BulkPreviewBlock` (`DEFAULT_BLOCKS`) render the demo registry's block types; pass custom `components` (merged over defaults) for app-specific block types.
 
 ### Headless path: custom UI
 
@@ -193,16 +215,15 @@ Default blocks `ConfirmBlock` / `BulkPreviewBlock` (`DEFAULT_BLOCKS`) render the
 import { AgentProvider, useAgentSession, useAgentProposal, BlockRouter, PendingProposals } from "@cleverhans/react";
 
 <AgentProvider session={session}>{children}</AgentProvider>
-
 const { snapshot, sendMessage, updateContext, confirm, reject } = useAgentSession();
 const { view, confirm, reject } = useAgentProposal(proposalId);
 ```
 
-`confirm(id)` / `reject(id, reason?)` are the ONLY proposal writes a frontend can perform. `BlockRouter` maps `proposal.block_type` → your component (props: `BlockProps` with slots + lifecycle handle); `PendingProposals` renders all non-terminal proposals.
+`confirm(id)` / `reject(id, reason?)` are the ONLY proposal writes a frontend can perform. `BlockRouter` maps `proposal.block_type` → your component; `PendingProposals` renders all non-terminal proposals.
 
 ### Reflecting executed actions in app state
 
-The server reports execution results via `ProposalStateChanged { state: "executed", result }`. Read them from the snapshot and fold into app state as a pure derivation (see `applyResults` in the playground):
+The server reports execution via `ProposalStateChanged { state: "executed", result }`. Read from the snapshot and fold into app state as a pure derivation (see `applyResults` in the playground):
 
 ```tsx
 const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -211,8 +232,8 @@ const docs = applyResults(SEED, snapshot.proposals); // filter view.state === "e
 
 ## Managing the integration
 
-- **Add an action**: registry entry (+ block if new) → handler + dry-run (if mutating) → slot builder → `ContextParamResolver` coverage for its context params → frontend block component (or reuse `confirm`/`bulk_preview`) → eval cases.
-- **Dev loop**: `cargo run -p cleverhans-demo -- serve` (needs `ANTHROPIC_API_KEY` or `OLLAMA_MODEL`) → `pnpm --filter @cleverhans/playground dev`. Demo server also serves a plain chat page at `http://127.0.0.1:8787`.
-- **Full test gate**: `cargo test && cargo clippy --all-targets --all-features -- -D warnings && pnpm -r test && pnpm -r typecheck`.
-- **Versioning**: client `Init` carries `spec_version`; major.minor must be compatible (spec §13). Bump `SPEC_VERSION` only with a spec change.
-- **Security invariants** (spec §12) that must survive any change: model can only emit utterance params; mutating actions always dry-run; execution requires a `ConfirmedProposal`; revalidation happens at confirm time; principals come only from the app's extractor.
+- **Add an action**: edit `registry.json` (+ block if new) + `context_params` mapping → regenerate bindings (codegen `--rs`/`--ts`/`--py`) → attach handler + dry-run (if mutating) + slot builder in the builder → frontend block component (or reuse `confirm`/`bulk_preview`) → eval cases (happy path, context-dependent targeting with/without selection, a decline near the boundary).
+- **Dev loop**: `cargo run -p cleverhans-demo -- serve` (needs `ANTHROPIC_API_KEY` or `OLLAMA_MODEL`) → `pnpm --filter @cleverhans/playground dev`. Demo also serves a plain chat page at `http://127.0.0.1:8787`.
+- **Full test gate**: `cargo test && cargo clippy --all-targets --all-features -- -D warnings` (plus `cargo clippy -p cleverhans-py -p cleverhans-node` — those two are excluded from default-members) `&& pnpm -r test && pnpm -r typecheck`.
+- **Versioning**: client `Init` carries `spec_version`; major.minor must be compatible (spec §13). `RegistrySchema::from_json` version-gates the document the same way.
+- **Security invariants** (spec §12) that must survive any change: model emits only utterance params; mutating actions always dry-run; execution requires a `ConfirmedProposal`; revalidation at confirm time; principals come only from the app's extractor/middleware.

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/cleverhans",
     "crates/cleverhans-codegen",
     "crates/cleverhans-conformance",
     "crates/cleverhans-core",
@@ -20,6 +21,7 @@ members = [
 # `cargo clippy` skip BOTH — lint them explicitly with
 # `cargo clippy -p cleverhans-py -p cleverhans-node`.
 default-members = [
+    "crates/cleverhans",
     "crates/cleverhans-codegen",
     "crates/cleverhans-conformance",
     "crates/cleverhans-core",
@@ -52,6 +54,7 @@ serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt"] }
 tokio-stream = "0.1"
+tracing = "0.1"
 tonic = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"

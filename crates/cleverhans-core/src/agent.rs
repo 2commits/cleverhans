@@ -147,6 +147,22 @@ impl<P: Send + Sync> Agent<P> {
         context_params: Arc<dyn ContextParamResolver>,
         config: AgentConfig,
     ) -> Self {
+        // Startup diagnostic: the registry as the agent sees it, so a
+        // missing action or wrong block is visible at assembly, not at the
+        // first proposal.
+        for def in registry.action_defs() {
+            tracing::info!(
+                action = def.id.as_str(),
+                block = def.block_type.as_str(),
+                mutates = def.mutates,
+                "action registered"
+            );
+        }
+        tracing::info!(
+            actions = registry.action_defs().count(),
+            blocks = registry.block_defs().count(),
+            "agent assembled"
+        );
         Self {
             registry,
             llm,
@@ -455,8 +471,7 @@ impl<P: Send + Sync> Agent<P> {
                 // is about *this moment's* app state, and generic "fix your
                 // arguments" advice teaches the model the wrong lesson — it
                 // starts refusing the action even after the user navigates.
-                let guidance = if matches!(failure, ValidationFailure::UnresolvedContextParam(_))
-                {
+                let guidance = if matches!(failure, ValidationFailure::UnresolvedContextParam(_)) {
                     "This reflects the app context at this moment, not a \
                      permanent limitation: the same tool call can succeed once \
                      the user navigates to a matching record. Tell the user \

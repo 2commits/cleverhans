@@ -1,0 +1,35 @@
+[package]
+name = "cleverhans"
+description = "Batteries-included facade for the CleverHans propose-only HITL agent framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# WebSocket + JSON transport binding (axum).
+ws = ["dep:cleverhans-ws"]
+# Anthropic Messages API provider.
+anthropic = ["dep:cleverhans-llm-anthropic"]
+# Local Ollama provider (zero egress).
+ollama = ["dep:cleverhans-llm-ollama"]
+# Action-mapping eval harness.
+evals = ["dep:cleverhans-evals"]
+# Deterministic doubles for offline integration tests.
+test-util = ["cleverhans-core/test-util"]
+
+[dependencies]
+cleverhans-core = { path = "../cleverhans-core" }
+cleverhans-evals = { path = "../cleverhans-evals", optional = true }
+cleverhans-llm-anthropic = { path = "../cleverhans-llm-anthropic", optional = true }
+cleverhans-llm-ollama = { path = "../cleverhans-llm-ollama", optional = true }
+cleverhans-ws = { path = "../cleverhans-ws", optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

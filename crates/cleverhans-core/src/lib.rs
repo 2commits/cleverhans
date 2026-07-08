@@ -14,6 +14,8 @@
 //! - [`validation`] — propose-time and confirm-time validation pipeline
 //! - [`seams`] — the traits an application implements to plug in
 //! - [`agent`] — the agent loop tying the above together
+//! - [`test_util`] (feature `test-util`) — deterministic doubles for
+//!   integration tests without a live model
 
 pub mod agent;
 pub mod envelope;
@@ -22,6 +24,8 @@ pub mod proposal;
 pub mod registry;
 pub mod schema;
 pub mod seams;
+#[cfg(feature = "test-util")]
+pub mod test_util;
 pub mod validation;
 
 /// Spec version this crate implements; `Init.spec_version` is checked

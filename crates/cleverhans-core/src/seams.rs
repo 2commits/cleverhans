@@ -6,12 +6,15 @@
 //! the app's principal type `P` so the framework never invents its own
 //! identity model.
 
+use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::JsonMap;
 use crate::envelope::{Context, DryRunPreview};
@@ -36,6 +39,39 @@ pub trait ActionHandler<P>: Send + Sync {
     ) -> Result<serde_json::Value, HandlerError>;
 }
 
+/// Async closures are action handlers, so stateless registrations stay
+/// inline — mirroring the [`SlotBuilder`] blanket impl. The closure takes
+/// owned params and principal (`P: Clone`) so its future is self-contained.
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::JsonMap;
+/// use cleverhans_core::seams::ActionHandler;
+///
+/// #[derive(Clone)]
+/// struct User;
+///
+/// let handler: Arc<dyn ActionHandler<User>> =
+///     Arc::new(|params: JsonMap, _user: User| async move {
+///         Ok(serde_json::Value::Object(params))
+///     });
+/// ```
+#[async_trait]
+impl<P, F, Fut> ActionHandler<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(JsonMap, P) -> Fut + Send + Sync,
+    Fut: Future<Output = Result<serde_json::Value, HandlerError>> + Send,
+{
+    async fn execute(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<serde_json::Value, HandlerError> {
+        self(params.clone(), principal.clone()).await
+    }
+}
+
 /// Side-effect-free preview of a mutating action (spec §7.2), computed under
 /// the principal's own data-access rules so it is permission-correct.
 #[async_trait]
@@ -48,6 +84,125 @@ pub trait DryRunHandler<P>: Send + Sync {
     /// or expired (confirm time).
     async fn dry_run(&self, params: &JsonMap, principal: &P)
     -> Result<DryRunPreview, HandlerError>;
+}
+
+/// Async closures are dry-run handlers too; see the [`ActionHandler`]
+/// blanket impl. The two blankets never collide — the future's output type
+/// picks the trait.
+#[async_trait]
+impl<P, F, Fut> DryRunHandler<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(JsonMap, P) -> Fut + Send + Sync,
+    Fut: Future<Output = Result<DryRunPreview, HandlerError>> + Send,
+{
+    async fn dry_run(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<DryRunPreview, HandlerError> {
+        self(params.clone(), principal.clone()).await
+    }
+}
+
+fn parse_params<T: DeserializeOwned>(params: &JsonMap) -> Result<T, HandlerError> {
+    serde_json::from_value(serde_json::Value::Object(params.clone())).map_err(|err| {
+        HandlerError::Internal(format!(
+            "validated params did not match the handler's params type \
+             (registry/codegen drift?): {err}"
+        ))
+    })
+}
+
+/// Wraps a closure over a typed params struct (e.g. codegen output) into an
+/// [`ActionHandler`]: the validated [`JsonMap`] is deserialized into `T`
+/// before the closure runs, so handler bodies never dig params out of JSON
+/// by string key.
+///
+/// ```
+/// use cleverhans_core::seams::typed_handler;
+///
+/// #[derive(Clone)]
+/// struct User;
+///
+/// #[derive(serde::Deserialize)]
+/// struct RenameParams {
+///     title: String,
+/// }
+///
+/// let handler = typed_handler(|params: RenameParams, _user: User| async move {
+///     Ok(serde_json::json!({ "title": params.title }))
+/// });
+/// ```
+pub fn typed_handler<P, T, F, Fut>(f: F) -> Arc<dyn ActionHandler<P>>
+where
+    P: Clone + Send + Sync + 'static,
+    T: DeserializeOwned + Send + 'static,
+    F: Fn(T, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<serde_json::Value, HandlerError>> + Send + 'static,
+{
+    struct Typed<F, T> {
+        f: F,
+        _params: PhantomData<fn() -> T>,
+    }
+
+    #[async_trait]
+    impl<P, T, F, Fut> ActionHandler<P> for Typed<F, T>
+    where
+        P: Clone + Send + Sync,
+        T: DeserializeOwned + Send,
+        F: Fn(T, P) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<serde_json::Value, HandlerError>> + Send,
+    {
+        async fn execute(
+            &self,
+            params: &JsonMap,
+            principal: &P,
+        ) -> Result<serde_json::Value, HandlerError> {
+            (self.f)(parse_params(params)?, principal.clone()).await
+        }
+    }
+
+    Arc::new(Typed {
+        f,
+        _params: PhantomData,
+    })
+}
+
+/// The [`DryRunHandler`] counterpart of [`typed_handler`].
+pub fn typed_dry_run<P, T, F, Fut>(f: F) -> Arc<dyn DryRunHandler<P>>
+where
+    P: Clone + Send + Sync + 'static,
+    T: DeserializeOwned + Send + 'static,
+    F: Fn(T, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<DryRunPreview, HandlerError>> + Send + 'static,
+{
+    struct Typed<F, T> {
+        f: F,
+        _params: PhantomData<fn() -> T>,
+    }
+
+    #[async_trait]
+    impl<P, T, F, Fut> DryRunHandler<P> for Typed<F, T>
+    where
+        P: Clone + Send + Sync,
+        T: DeserializeOwned + Send,
+        F: Fn(T, P) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<DryRunPreview, HandlerError>> + Send,
+    {
+        async fn dry_run(
+            &self,
+            params: &JsonMap,
+            principal: &P,
+        ) -> Result<DryRunPreview, HandlerError> {
+            (self.f)(parse_params(params)?, principal.clone()).await
+        }
+    }
+
+    Arc::new(Typed {
+        f,
+        _params: PhantomData,
+    })
 }
 
 /// Authorization decision from the app's permission system.

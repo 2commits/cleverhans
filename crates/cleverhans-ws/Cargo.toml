@@ -13,5 +13,11 @@ cleverhans-ws-core = { path = "../cleverhans-ws-core" }
 futures-util = { version = "0.3", default-features = false }
 tokio = { workspace = true, features = ["sync"] }
 
+[dev-dependencies]
+async-trait = { workspace = true }
+cleverhans-core = { path = "../cleverhans-core", features = ["test-util"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
+
 [lints]
 workspace = true

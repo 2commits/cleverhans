@@ -167,6 +167,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "cleverhans"
+version = "0.1.0"
+dependencies = [
+ "cleverhans-core",
+ "cleverhans-evals",
+ "cleverhans-llm-anthropic",
+ "cleverhans-llm-ollama",
+ "cleverhans-ws",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "cleverhans-codegen"
 version = "0.1.0"
 dependencies = [
@@ -191,12 +204,14 @@ name = "cleverhans-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cleverhans-core",
  "futures-core",
  "futures-util",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -206,12 +221,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "cleverhans",
  "cleverhans-codegen",
- "cleverhans-core",
- "cleverhans-evals",
- "cleverhans-llm-anthropic",
- "cleverhans-llm-ollama",
- "cleverhans-ws",
+ "serde",
  "serde_json",
  "tokio",
  "tracing-subscriber",
@@ -323,10 +335,12 @@ dependencies = [
 name = "cleverhans-ws"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "cleverhans-core",
  "cleverhans-ws-core",
  "futures-util",
+ "serde_json",
  "tokio",
 ]
 

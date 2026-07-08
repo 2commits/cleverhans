@@ -8,15 +8,19 @@
 //!
 //! - [`typescript_module`] — TS string-literal unions + interfaces
 //! - [`python_module`] — Python `Literal` unions + `TypedDict`s (3.11+)
+//! - [`rust_module`] — Rust ID constants + typed params structs (for
+//!   `cleverhans_core::seams::typed_handler`)
 //!
 //! Apps run the bundled CLI (`cargo run -p cleverhans-codegen -- --schema
-//! registry.json --ts out.ts --py out.py`) or call the emitters from a build
-//! script.
+//! registry.json --ts out.ts --py out.py --rs out.rs`) or call the emitters
+//! from a build script.
 
 mod py;
+mod rs;
 mod ts;
 
 pub use py::python_module;
+pub use rs::rust_module;
 pub use ts::typescript_module;
 
 /// Converts an inert key like `transaction.coBuyer.remove` into an

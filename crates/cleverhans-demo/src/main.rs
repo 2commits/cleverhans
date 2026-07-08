@@ -20,30 +20,9 @@ use axum::http::HeaderMap;
 use axum::response::Html;
 use axum::routing::get;
 
-use cleverhans_core::agent::{Agent, AgentConfig};
-use cleverhans_core::seams::LlmProvider;
-use cleverhans_llm_anthropic::{AnthropicConfig, AnthropicProvider};
-use cleverhans_llm_ollama::{OllamaConfig, OllamaProvider};
-use cleverhans_ws::{PrincipalExtractor, agent_router};
+use cleverhans::prelude::*;
 
 use registry::{AllowAll, DemoUser, Store, build_registry, context_resolver};
-
-fn provider() -> anyhow::Result<Arc<dyn LlmProvider>> {
-    if let Ok(model) = std::env::var("OLLAMA_MODEL") {
-        eprintln!("provider: ollama ({model})");
-        return Ok(Arc::new(OllamaProvider::new(OllamaConfig::new(model))));
-    }
-    if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-        // e.g. ANTHROPIC_MODEL=claude-haiku-4-5 for a cheaper/faster run.
-        let mut config = AnthropicConfig::new(api_key);
-        if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
-            config.model = model;
-        }
-        eprintln!("provider: anthropic ({})", config.model);
-        return Ok(Arc::new(AnthropicProvider::new(config)));
-    }
-    bail!("set ANTHROPIC_API_KEY or OLLAMA_MODEL to pick a model provider");
-}
 
 fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
     let store = Store::seeded();
@@ -59,7 +38,9 @@ fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
     };
     Ok(Arc::new(Agent::with_config(
         Arc::new(build_registry(&store)),
-        provider()?,
+        // OLLAMA_MODEL wins, then ANTHROPIC_API_KEY (+ optional
+        // ANTHROPIC_MODEL, e.g. claude-haiku-4-5 for a cheaper run).
+        cleverhans::llm::from_env()?,
         Arc::new(AllowAll),
         Arc::new(context_resolver()),
         config,
@@ -91,13 +72,13 @@ async fn serve() -> anyhow::Result<()> {
 
 async fn eval(path: &str) -> anyhow::Result<()> {
     let json = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
-    let cases = cleverhans_evals::load_cases(&json).context("parse cases")?;
+    let cases = cleverhans::evals::load_cases(&json).context("parse cases")?;
     let agent = agent()?;
     let principal = DemoUser {
         name: "eval".to_owned(),
     };
     eprintln!("running {} case(s) as `{}`", cases.len(), principal.name);
-    let report = cleverhans_evals::run_suite(&agent, &principal, cases).await;
+    let report = cleverhans::evals::run_suite(&agent, &principal, cases).await;
     print!("{report}");
     if !report.all_passed() {
         bail!("eval suite failed");

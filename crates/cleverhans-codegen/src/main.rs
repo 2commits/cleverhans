@@ -1,29 +1,31 @@
 //! Codegen CLI: registry document in, typed modules out.
 //!
 //! ```text
-//! cargo run -p cleverhans-codegen -- --schema registry.json --ts out.ts --py out.py
+//! cargo run -p cleverhans-codegen -- --schema registry.json --ts out.ts --py out.py --rs out.rs
 //! ```
 //!
 //! With no output flag the TypeScript module goes to stdout.
 
 use std::process::ExitCode;
 
-use cleverhans_codegen::{python_module, typescript_module};
+use cleverhans_codegen::{python_module, rust_module, typescript_module};
 use cleverhans_core::schema::RegistrySchema;
 
 struct Args {
     schema: String,
     ts: Option<String>,
     py: Option<String>,
+    rs: Option<String>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
-    let (mut schema, mut ts, mut py) = (None, None, None);
+    let (mut schema, mut ts, mut py, mut rs) = (None, None, None, None);
     while let Some(flag) = args.next() {
         let slot = match flag.as_str() {
             "--schema" => &mut schema,
             "--ts" => &mut ts,
             "--py" => &mut py,
+            "--rs" => &mut rs,
             other => return Err(format!("unknown flag `{other}`")),
         };
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -35,6 +37,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         schema: schema.ok_or("--schema <file> is required")?,
         ts,
         py,
+        rs,
     })
 }
 
@@ -48,12 +51,16 @@ fn run(args: Args) -> Result<(), String> {
         Some(path) => {
             std::fs::write(path, &ts_module).map_err(|err| format!("write {path}: {err}"))?;
         }
-        None if args.py.is_none() => print!("{ts_module}"),
+        None if args.py.is_none() && args.rs.is_none() => print!("{ts_module}"),
         None => {}
     }
     if let Some(path) = &args.py {
         let py_module = python_module(&schema.actions, &schema.blocks);
         std::fs::write(path, &py_module).map_err(|err| format!("write {path}: {err}"))?;
+    }
+    if let Some(path) = &args.rs {
+        let rs_module = rust_module(&schema.actions, &schema.blocks);
+        std::fs::write(path, &rs_module).map_err(|err| format!("write {path}: {err}"))?;
     }
     Ok(())
 }
@@ -64,7 +71,7 @@ fn main() -> ExitCode {
         Err(message) => {
             eprintln!("cleverhans-codegen: {message}");
             eprintln!(
-                "usage: cleverhans-codegen --schema <registry.json> [--ts <out.ts>] [--py <out.py>]"
+                "usage: cleverhans-codegen --schema <registry.json> [--ts <out.ts>] [--py <out.py>] [--rs <out.rs>]"
             );
             ExitCode::FAILURE
         }
@@ -86,8 +93,8 @@ mod tests {
 
     #[test]
     fn parses_all_flags() {
-        let args = parse(&["--schema", "r.json", "--ts", "a.ts", "--py", "b.py"])
-            .expect("valid args");
+        let args =
+            parse(&["--schema", "r.json", "--ts", "a.ts", "--py", "b.py"]).expect("valid args");
 
         assert_eq!(
             (args.schema.as_str(), args.ts.as_deref(), args.py.as_deref()),

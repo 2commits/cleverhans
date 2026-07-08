@@ -2,7 +2,7 @@
 //! must round-trip to exactly the committed document, and the committed
 //! codegen outputs must match what the document generates.
 
-use cleverhans_codegen::{python_module, typescript_module};
+use cleverhans_codegen::{python_module, rust_module, typescript_module};
 use cleverhans_demo::registry::{Store, build_registry, demo_schema};
 
 fn repo_file(relative: &str) -> String {
@@ -32,6 +32,21 @@ fn committed_typescript_module_is_fresh() {
         repo_file("../../typescript/playground/src/generated/registry.ts"),
         generated,
         "generated TS is stale — run `pnpm codegen`"
+    );
+}
+
+#[test]
+fn committed_rust_module_is_fresh() {
+    let schema = demo_schema();
+
+    let generated = rust_module(&schema.actions, &schema.blocks);
+
+    assert_eq!(
+        repo_file("src/generated.rs"),
+        generated,
+        "generated Rust is stale — run `cargo run -p cleverhans-codegen -- \
+         --schema crates/cleverhans-demo/registry.json --rs \
+         crates/cleverhans-demo/src/generated.rs`"
     );
 }
 

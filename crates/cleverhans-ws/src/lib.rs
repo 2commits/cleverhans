@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -49,6 +49,44 @@ pub fn agent_router<P: Send + Sync + 'static>(
     Router::new()
         .route(path, get(upgrade_handler::<P>))
         .with_state(Arc::new(WsState { agent, principals }))
+}
+
+/// A router serving the envelope stream with the principal taken from
+/// request [extensions](axum::Extension) — for apps whose existing auth
+/// middleware (a tower/axum layer) already resolves the caller. The
+/// framework still never constructs a principal; a request that reaches the
+/// route without one is refused with `401` before any envelope traffic.
+///
+/// ```no_run
+/// # use std::sync::Arc;
+/// # use axum::{Extension, Router};
+/// # #[derive(Clone)] struct MyUser;
+/// # fn app(agent: Arc<cleverhans_core::agent::Agent<MyUser>>, auth_layer: Extension<MyUser>) -> Router {
+/// Router::new()
+///     .merge(cleverhans_ws::agent_router_from_extension("/agent", agent))
+///     .layer(auth_layer) // your existing middleware inserts MyUser
+/// # }
+/// ```
+pub fn agent_router_from_extension<P: Clone + Send + Sync + 'static>(
+    path: &str,
+    agent: Arc<Agent<P>>,
+) -> Router {
+    Router::new()
+        .route(path, get(extension_upgrade_handler::<P>))
+        .with_state(agent)
+}
+
+async fn extension_upgrade_handler<P: Clone + Send + Sync + 'static>(
+    State(agent): State<Arc<Agent<P>>>,
+    principal: Option<Extension<P>>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let Some(Extension(principal)) = principal else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    upgrade
+        .on_upgrade(move |socket| serve_socket(socket, agent, principal))
+        .into_response()
 }
 
 async fn upgrade_handler<P: Send + Sync + 'static>(
