@@ -16,6 +16,12 @@ set -euo pipefail
 cd "$(dirname "$0")/../typescript"
 
 RUN_ID="${1:?usage: scripts/bootstrap-npm.sh <github-actions-run-id>}"
+
+# A previous attempt's `napi prepublish` injects pinned optionalDependencies
+# into cleverhans-node/package.json — transient release state that breaks
+# --frozen-lockfile on re-runs. Reset it; napi regenerates it below.
+git checkout -- cleverhans-node/package.json
+
 VERSION="$(node -p "require('./cleverhans-node/package.json').version")"
 echo "bootstrapping npm packages at $VERSION"
 
