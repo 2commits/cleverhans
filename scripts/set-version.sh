@@ -33,16 +33,26 @@ perl -pi -e '
 perl -pi -e '$done ||= s{^version = "[^"]+"$}{version = "'"$VERSION"'"};' \
   python/cleverhans-hitl/pyproject.toml
 
-# npm packages.
+# npm packages. Also strip napi's injected optionalDependencies — that's
+# transient prepublish state (a bootstrap run leaves it behind) and it
+# breaks --frozen-lockfile if committed.
 for p in cleverhans-react cleverhans-ui cleverhans-node create-cleverhans; do
   node -e '
     const fs = require("fs");
     const path = `typescript/'"$p"'/package.json`;
     const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
     pkg.version = process.argv[1];
+    if (pkg.optionalDependencies &&
+        Object.keys(pkg.optionalDependencies).every((k) => k.startsWith("@cleverhans/node-"))) {
+      delete pkg.optionalDependencies;
+    }
     fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
   ' "$VERSION"
 done
+
+# Fail fast if the workspace lockfile disagrees with the manifests — CI
+# installs with --frozen-lockfile and would die on the first job.
+(cd typescript && pnpm install --frozen-lockfile --lockfile-only > /dev/null)
 
 # Refresh Cargo.lock for the workspace members.
 cargo update --workspace --quiet
