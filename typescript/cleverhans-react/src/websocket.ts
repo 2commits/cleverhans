@@ -28,11 +28,24 @@ export interface ClosableTransport extends AgentTransport {
  * Opens a WebSocket carrying one envelope session. Client events sent before
  * the socket opens are queued and flushed on open, so `AgentSession`'s
  * init-first guarantee survives the handshake.
+ *
+ * Under SSR (no `WebSocket` global and no injected factory) it returns an
+ * inert transport instead of throwing, so a session constructed during a
+ * server render is safe — the client render constructs the live one.
  */
 export function createWebSocketTransport(
   url: string,
   options: WebSocketTransportOptions = {},
 ): ClosableTransport {
+  if (options.webSocketFactory === undefined && typeof WebSocket === "undefined") {
+    return {
+      send() {},
+      subscribe() {
+        return () => {};
+      },
+      close() {},
+    };
+  }
   const factory =
     options.webSocketFactory ?? ((u, p) => new WebSocket(u, p));
   const socket = factory(url, options.protocols);

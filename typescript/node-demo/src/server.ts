@@ -7,6 +7,8 @@
 
 import { WebSocketServer } from "ws";
 
+import { bindAgentSocket } from "@cleverhans/node";
+
 import { makeAgent, pickLlm } from "./registry.ts";
 
 const agent = makeAgent(pickLlm());
@@ -16,18 +18,7 @@ wss.on("connection", (ws, request) => {
   // Demo-only principal: a real app maps its session cookie / bearer token
   // here (spec §10) and refuses the upgrade when unauthenticated.
   void request;
-  const session = agent.session({ user_id: "demo", roles: ["editor"] });
-  ws.on("message", (data) => {
-    void session
-      .handle(String(data), (event) => ws.send(JSON.stringify(event)))
-      .then((closed) => {
-        // Init-first violation (spec §6.1): mirror the Rust WS binding and
-        // close the socket instead of leaving a zombie stream.
-        if (closed) {
-          ws.close();
-        }
-      });
-  });
+  ws.on("message", bindAgentSocket(agent, { user_id: "demo", roles: ["editor"] }, ws));
 });
 
 console.log("envelope stream at ws://127.0.0.1:8788/agent");
