@@ -2,12 +2,13 @@
 name = "cleverhans-codegen"
 description = "TypeScript + Python codegen for CleverHans action registries"
 version.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-cleverhans-core = { path = "../cleverhans-core" }
+cleverhans-core = { workspace = true }
 
 [lints]
 workspace = true

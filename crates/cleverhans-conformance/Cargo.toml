@@ -9,8 +9,8 @@ publish = false
 
 [dependencies]
 async-trait = { workspace = true }
-cleverhans-core = { path = "../cleverhans-core" }
-cleverhans-ws-core = { path = "../cleverhans-ws-core" }
+cleverhans-core = { workspace = true }
+cleverhans-ws-core = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

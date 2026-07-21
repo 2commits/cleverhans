@@ -2,6 +2,7 @@
 name = "cleverhans"
 description = "Batteries-included facade for the CleverHans propose-only HITL agent framework"
 version.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -20,13 +21,22 @@ evals = ["dep:cleverhans-evals"]
 test-util = ["cleverhans-core/test-util"]
 
 [dependencies]
-cleverhans-core = { path = "../cleverhans-core" }
-cleverhans-evals = { path = "../cleverhans-evals", optional = true }
-cleverhans-llm-anthropic = { path = "../cleverhans-llm-anthropic", optional = true }
-cleverhans-llm-ollama = { path = "../cleverhans-llm-ollama", optional = true }
-cleverhans-ws = { path = "../cleverhans-ws", optional = true }
+cleverhans-core = { workspace = true }
+cleverhans-evals = { workspace = true, optional = true }
+cleverhans-llm-anthropic = { workspace = true, optional = true }
+cleverhans-llm-ollama = { workspace = true, optional = true }
+cleverhans-ws = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
+
+[[example]]
+name = "mount_axum"
+required-features = ["ws", "test-util"]
 
 [package.metadata.docs.rs]
 all-features = true

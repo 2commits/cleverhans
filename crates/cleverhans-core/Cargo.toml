@@ -2,6 +2,7 @@
 name = "cleverhans-core"
 description = "Reference backend for the CleverHans propose-only HITL agent protocol"
 version.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

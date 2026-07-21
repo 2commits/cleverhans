@@ -43,6 +43,21 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/nordalf/cleverhans"
 
 [workspace.dependencies]
+# Internal crates carry both `path` (workspace builds) and `version`
+# (crates.io resolution) — `cargo publish` rejects path-only dependencies.
+# conformance/ffi stay `publish = false`; they carry a version anyway so
+# `cargo package --workspace` can verify the crates that depend on them.
+cleverhans-core = { path = "crates/cleverhans-core", version = "0.1.0" }
+cleverhans-ws-core = { path = "crates/cleverhans-ws-core", version = "0.1.0" }
+cleverhans-ws = { path = "crates/cleverhans-ws", version = "0.1.0" }
+cleverhans-llm-anthropic = { path = "crates/cleverhans-llm-anthropic", version = "0.1.0" }
+cleverhans-llm-ollama = { path = "crates/cleverhans-llm-ollama", version = "0.1.0" }
+cleverhans-evals = { path = "crates/cleverhans-evals", version = "0.1.0" }
+cleverhans-codegen = { path = "crates/cleverhans-codegen", version = "0.1.0" }
+cleverhans = { path = "crates/cleverhans", version = "0.1.0" }
+cleverhans-conformance = { path = "crates/cleverhans-conformance", version = "0.1.0" }
+cleverhans-ffi = { path = "crates/cleverhans-ffi", version = "0.1.0" }
+
 async-stream = "0.3"
 async-trait = "0.1"
 futures-core = "0.3"

@@ -13,8 +13,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 async-trait = { workspace = true }
-cleverhans-core = { path = "../cleverhans-core" }
-cleverhans-ffi = { path = "../cleverhans-ffi" }
+cleverhans-core = { workspace = true }
+cleverhans-ffi = { workspace = true }
 pyo3 = { version = "0.26", features = ["abi3-py311", "extension-module"] }
 pyo3-async-runtimes = { version = "0.26", features = ["tokio-runtime"] }
 pythonize = "0.26"

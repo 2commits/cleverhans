@@ -9,11 +9,12 @@ publish = false
 
 [dependencies]
 async-trait = { workspace = true }
-cleverhans-conformance = { path = "../cleverhans-conformance" }
-cleverhans-core = { path = "../cleverhans-core" }
-cleverhans-ws-core = { path = "../cleverhans-ws-core" }
-cleverhans-llm-anthropic = { path = "../cleverhans-llm-anthropic" }
-cleverhans-llm-ollama = { path = "../cleverhans-llm-ollama" }
+cleverhans-codegen = { workspace = true }
+cleverhans-conformance = { workspace = true }
+cleverhans-core = { workspace = true }
+cleverhans-ws-core = { workspace = true }
+cleverhans-llm-anthropic = { workspace = true }
+cleverhans-llm-ollama = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

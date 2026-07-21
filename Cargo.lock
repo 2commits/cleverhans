@@ -170,12 +170,15 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 name = "cleverhans"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "cleverhans-core",
  "cleverhans-evals",
  "cleverhans-llm-anthropic",
  "cleverhans-llm-ollama",
  "cleverhans-ws",
+ "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
@@ -245,6 +248,7 @@ name = "cleverhans-ffi"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "cleverhans-codegen",
  "cleverhans-conformance",
  "cleverhans-core",
  "cleverhans-llm-anthropic",

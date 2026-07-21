@@ -2,12 +2,13 @@
 name = "cleverhans-ws-core"
 description = "Framework-neutral JSON-frame session loop for the CleverHans envelope"
 version.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
-cleverhans-core = { path = "../cleverhans-core" }
+cleverhans-core = { workspace = true }
 futures-util = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

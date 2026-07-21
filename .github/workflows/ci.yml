@@ -25,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -32,3 +34,37 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
       - run: pnpm -r test
+      - name: Generated types are fresh
+        run: pnpm codegen:check
+        working-directory: typescript
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin pytest
+      - run: maturin build --out dist
+        working-directory: python/cleverhans-hitl
+      - run: pip install python/cleverhans-hitl/dist/*.whl
+      - run: pytest tests/ -q
+        working-directory: python/cleverhans-hitl
+
+  package:
+    # Publishability gate: every publishable crate must package cleanly.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: >
+          cargo package --workspace --no-verify
+          --exclude cleverhans-conformance --exclude cleverhans-ffi
+          --exclude cleverhans-py --exclude cleverhans-node
+          --exclude cleverhans-demo

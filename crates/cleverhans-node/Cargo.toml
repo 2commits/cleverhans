@@ -12,8 +12,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 async-trait = { workspace = true }
-cleverhans-core = { path = "../cleverhans-core" }
-cleverhans-ffi = { path = "../cleverhans-ffi" }
+cleverhans-core = { workspace = true }
+cleverhans-ffi = { workspace = true }
 napi = { version = "3", default-features = false, features = ["napi8", "async", "serde-json"] }
 napi-derive = "3"
 serde = { workspace = true }
