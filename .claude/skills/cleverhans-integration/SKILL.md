@@ -9,7 +9,7 @@ CleverHans is propose-only: the agent **never executes**. It proposes actions ag
 
 Spec version: `cleverhans_core::SPEC_VERSION = "0.1"`. Proposal lifecycle: `Proposed → {Invalid, Validated}`, `Validated → {Confirmed, Rejected, Expired}`, `Confirmed → {Executed, Failed, Expired}`. External code observes states; only `ProposalStore::confirm` can mint a `ConfirmedProposal` (non-Clone confirmation witness).
 
-Repo layout: Rust crates in `crates/`, TypeScript packages in `typescript/`, Python in `python/`. Canonical end-to-end wiring: `crates/cleverhans-demo/` (Rust) and `typescript/playground/src/App.tsx` (TS).
+Repo layout: Rust crates in `crates/`, TypeScript packages in `typescript/`, Python in `python/`. Canonical end-to-end wiring: `crates/cleverhans/examples/mount_axum.rs` (mount into an existing axum app, runs offline), `crates/cleverhans-demo/` (full Rust dogfood), `typescript/playground/src/App.tsx` (React), `typescript/node-demo/src/server.ts` (Node host via `bindAgentSocket`), `python/examples/fastapi_ws.py` (Python host). Human-facing guides live in `docs/` (per-language quickstarts, action authoring, troubleshooting).
 
 ## Rust backend
 
@@ -67,13 +67,16 @@ Building programmatically instead (`Registry::builder().block(...).action(...)`)
 ```sh
 cargo run -p cleverhans-codegen -- --schema registry.json \
   --rs src/generated.rs --ts app/generated/registry.ts --py generated/registry.py
+# add --check to verify freshness without writing (CI gate)
 ```
 
-The Rust module (`--rs`) gives you `action_ids::DOCUMENT_RENAME` constants (typo'd `attach` id → compile error) and per-action params structs like `DocumentRenameParams` (serde `Deserialize`, `deny_unknown_fields`, string-enum params become generated enums). Pin freshness with a golden test comparing `rust_module(&schema.actions, &schema.blocks)` against the committed file.
+No Rust toolchain? The same codegen ships in the bindings: `npx cleverhans-codegen --schema registry.json --ts out.ts` (from `@cleverhans/node`) and `cleverhans_agent.generate_types(registry, target)` (PyPI `cleverhans-hitl`).
 
-### 3. Attach handlers — three styles, pick per action
+The Rust module (`--rs`) gives you `action_ids::DOCUMENT_RENAME` constants (typo'd `bind` id → compile error) and per-action params structs like `DocumentRenameParams` (serde `Deserialize`, `deny_unknown_fields`, string-enum params become generated enums). Pin freshness with a golden test comparing `rust_module(&schema.actions, &schema.blocks)` against the committed file, or `--check` in CI.
 
-Load the document, bind handlers by id, build:
+### 3. Attach handlers — `.bind()` with named setters
+
+Load the document, bind handlers by id, build. `.bind(id, |action| ...)` takes any impl — closure, struct, or an already-`Arc`'d handler from `typed_handler` — no `Some(Arc::new(...))` wrapping:
 
 ```rust
 use cleverhans::prelude::*;
@@ -82,34 +85,34 @@ use crate::generated::{DocumentRenameParams, action_ids};
 let schema = RegistrySchema::from_json(include_str!("../registry.json"))?;
 let registry = RegistryBuilder::from_schema(schema)
     // (a) typed closure over codegen params — no JSON digging:
-    .attach(action_ids::DOCUMENT_RENAME,
-        typed_handler(move |p: DocumentRenameParams, _user: MyUser| async move {
+    .bind(action_ids::DOCUMENT_RENAME, |action| action
+        .handler(typed_handler(move |p: DocumentRenameParams, _user: MyUser| async move {
             Ok(serde_json::json!({ "id": p.document_id, "title": p.title }))
-        }),
-        Some(typed_dry_run(move |p: DocumentRenameParams, _user: MyUser| async move {
+        }))
+        .dry_run(typed_dry_run(move |p: DocumentRenameParams, _user: MyUser| async move {
             Ok(DryRunPreview { affected_count: 1, ..Default::default() })
-        })),
-        Some(Arc::new(|params: &JsonMap, _: Option<&DryRunPreview>| slots! {
+        }))
+        .slots(|params: &JsonMap, _: Option<&DryRunPreview>| slots! {
             "title": "Rename document",
-        })))
-    // (b) plain closure over the raw JsonMap:
-    .attach(action_ids::DOCUMENT_PUBLISH,
-        Arc::new(|params: JsonMap, _user: MyUser| async move { Ok(serde_json::Value::Null) }),
-        Some(Arc::new(|_: JsonMap, _: MyUser| async move { Ok(DryRunPreview::default()) })),
-        Some(static_slots(slots! { "title": "Publish document" })))
+        }))
+    // (b) plain closure over the raw JsonMap + fixed card:
+    .bind(action_ids::DOCUMENT_PUBLISH, |action| action
+        .handler(|params: JsonMap, _user: MyUser| async move { Ok(serde_json::Value::Null) })
+        .dry_run(|_: JsonMap, _: MyUser| async move { Ok(DryRunPreview::default()) })
+        .static_slots(slots! { "title": "Publish document" }))
     // (c) trait impl on a struct — for owned state, or one type serving both seams
-    .attach(action_ids::DOCUMENTS_DELETE_BY_STATUS,
-        Arc::new(DeleteByStatus(store.clone())),
-        Some(Arc::new(DeleteByStatus(store.clone()))),
-        Some(static_slots(slots! { "title": "Bulk delete" })))
+    .bind(action_ids::DOCUMENTS_DELETE_BY_STATUS, |action| action
+        .handler(DeleteByStatus(store.clone()))
+        .dry_run(DeleteByStatus(store.clone()))
+        .static_slots(slots! { "title": "Bulk delete" }))
     .build()?;
 ```
 
-Closure handlers work via blanket impls (require `P: Clone`); `typed_handler` / `typed_dry_run` wrap a closure over a codegen params struct. Struct impls (`impl ActionHandler<P> for T`) remain for stateful handlers. Slot builders: closures, or `static_slots(slots! { ... })` for fixed cards.
+Closure handlers work via blanket impls (require `P: Clone`); `typed_handler` / `typed_dry_run` wrap a closure over a codegen params struct. Struct impls (`impl ActionHandler<P> for T`, with `#[async_trait]` re-exported from the prelude) remain for stateful handlers. A binding with no `.handler(...)` fails `.build()` with `MissingHandler`. The positional `.attach(id, handler, dry_run, slot_builder)` form still exists.
 
 The other two seams:
-- `AuthzResolver<P>::authorize(&self, principal, action_id, params) -> AuthzDecision` (`Allow` / `Deny(reason)`) — called at propose AND confirm time.
-- Context params: use `schema.context_resolver()` (a `MappedContextResolver` over the document's `context_params`) for the common case — **zero app code**. Implement `ContextParamResolver` yourself only for richer needs.
+- `AuthzResolver<P>` — `Allow` / `Deny(reason)`, called at propose AND confirm time. Three forms: the shipped `AllowAll` (demos/tests/transport-auth-only apps), an async closure `|principal, action_id: String, params: JsonMap| async move { ... }` via the blanket impl, or a trait impl over your permission system.
+- Context params: `schema.context_resolver()?` (a `MappedContextResolver` over the document's `context_params`) for the common case — **zero app code**. It returns `Err(UnmappedContextParam)` at startup if any context-sourced param lacks a mapping. Implement `ContextParamResolver` yourself only for richer needs.
 
 Validation order (propose and confirm time): existence → param fill + typecheck (context via resolver; unknown params and model writes to context params rejected) → authz → dry-run (iff mutates) → slot build → slot check. `ValidationFailure::is_model_fixable()` gates agent retries.
 
@@ -130,7 +133,7 @@ Custom providers implement `LlmProvider::complete` (and optionally `complete_str
 
 ```rust
 let agent = Arc::new(Agent::with_config(
-    Arc::new(registry), llm, Arc::new(MyAuthz), Arc::new(schema.context_resolver()),
+    Arc::new(registry), llm, Arc::new(MyAuthz), Arc::new(schema.context_resolver()?),
     AgentConfig { app_instructions: Some("This app is ...".into()), ..Default::default() },
 ));
 ```
