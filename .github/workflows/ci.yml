@@ -68,8 +68,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Full verify (no --no-verify): builds each crate from its packaged
+      # tarball, catching files that live outside the crate directory —
+      # exactly what `cargo publish` will do at release time.
       - run: >
-          cargo package --workspace --no-verify
+          cargo package --workspace
           --exclude cleverhans-conformance --exclude cleverhans-ffi
           --exclude cleverhans-py --exclude cleverhans-node
           --exclude cleverhans-demo

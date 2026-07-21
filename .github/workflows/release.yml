@@ -156,7 +156,8 @@ jobs:
         run: pnpm -r build
         working-directory: typescript
       - name: Publish platform packages
-        run: pnpm exec napi prepublish -t npm --skip-gh-release
+        # No --gh-release: napi v3 makes the GitHub release opt-in.
+        run: pnpm exec napi prepublish -t npm
         working-directory: typescript/cleverhans-node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
