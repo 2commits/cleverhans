@@ -6,6 +6,7 @@ readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 [dependencies]
 cleverhans-core = { workspace = true }

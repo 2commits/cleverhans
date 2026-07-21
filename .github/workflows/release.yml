@@ -1,7 +1,7 @@
 name: Release
 
 # Publishes on version tags (v0.1.0):
-#   crates.io — the 9 publishable crates (publish = false crates are skipped)
+#   crates.io — the 8 publishable crates (publish = false crates are skipped)
 #   npm       — @cleverhans/react, @cleverhans/ui, @cleverhans/node (+ per-platform binaries)
 #   PyPI      — cleverhans-hitl abi3 wheels (linux x64/arm64, macOS x64/arm64, windows x64) + sdist
 #
@@ -75,7 +75,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo publish --workspace
+      # Skip-existing + 429-aware: crates.io rate-limits new crate names,
+      # so a first release publishes in waves; re-runs resume where the
+      # last attempt stopped.
+      - run: ./scripts/publish-crates.sh
+        timeout-minutes: 120
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -156,8 +160,7 @@ jobs:
         run: pnpm -r build
         working-directory: typescript
       - name: Publish platform packages
-        # No --gh-release: napi v3 makes the GitHub release opt-in.
-        run: pnpm exec napi prepublish -t npm
+        run: pnpm exec napi prepublish -t npm --no-gh-release
         working-directory: typescript/cleverhans-node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -240,3 +243,5 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          # Re-runs skip files PyPI already has instead of failing.
+          skip-existing: true

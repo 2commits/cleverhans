@@ -41,8 +41,14 @@ registries — but they never move the stable pointer.
 ## If a job fails mid-release
 
 Jobs are independent and registry versions are immutable, so never delete
-and re-push the tag. Use **Re-run failed jobs** in the Actions UI; already-
-published registries reject duplicates and the rest proceeds.
+and re-push the tag. Use **Re-run failed jobs** in the Actions UI:
+
+- **crates** resumes — `scripts/publish-crates.sh` skips crates already on
+  crates.io and waits out the new-crate rate limit (429), so a first
+  release that publishes in waves just needs patience or a re-run.
+- **pypi** resumes — `skip-existing` ignores files PyPI already has.
+- **npm** is the strict one: re-publishing an existing version fails, so
+  fix forward with a patch release if npm partially published.
 
 ## One-time registry setup
 
