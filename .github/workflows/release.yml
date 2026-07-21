@@ -166,8 +166,19 @@ jobs:
       - name: Build JS/TS packages
         run: pnpm -r build
         working-directory: typescript
+      - name: Already published? (bootstrap runs publish outside CI)
+        id: published
+        run: |
+          V="${{ needs.semver.outputs.version }}"
+          if npm view "@cleverhans/node@$V" version > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "@cleverhans/node@$V already on npm — skipping npm publishes"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish platform packages
         # napi shells out to `npm publish`, which picks up OIDC itself.
+        if: steps.published.outputs.skip != 'true'
         run: pnpm exec napi prepublish -t npm --no-gh-release
         working-directory: typescript/cleverhans-node
         env:
@@ -177,6 +188,7 @@ jobs:
       - name: Publish workspace packages
         # pnpm pack applies publishConfig + rewrites workspace:* deps;
         # npm publish (>= 11.5.1) does the OIDC exchange.
+        if: steps.published.outputs.skip != 'true'
         working-directory: typescript
         run: |
           for p in cleverhans-react cleverhans-ui cleverhans-node create-cleverhans; do
