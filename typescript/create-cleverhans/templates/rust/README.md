@@ -27,4 +27,4 @@ Next steps:
 A complete runnable version of this wiring:
 `cargo run -p cleverhans --example mount_axum --features "ws test-util"`
 (in the CleverHans repo). Guides:
-https://github.com/nordalf/cleverhans/tree/main/docs
+https://github.com/2commits/cleverhans/tree/main/docs

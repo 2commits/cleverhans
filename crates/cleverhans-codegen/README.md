@@ -1,7 +1,7 @@
 # cleverhans-codegen
 
 Registry document → typed modules for
-[CleverHans](https://github.com/nordalf/cleverhans): TypeScript string-literal
+[CleverHans](https://github.com/2commits/cleverhans): TypeScript string-literal
 unions + interfaces, Python `Literal` + `TypedDict`s, Rust ID constants +
 params structs (for `typed_handler`). One registry edit, every consumer
 type-safe.

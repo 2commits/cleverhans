@@ -1,6 +1,6 @@
 # cleverhans-hitl
 
-Python host binding for [CleverHans](https://github.com/nordalf/cleverhans) —
+Python host binding for [CleverHans](https://github.com/2commits/cleverhans) —
 a propose-only, in-app, human-in-the-loop agent framework. The agent never
 acts on your system: it proposes actions from your closed registry; your
 handlers execute only after explicit user confirmation, under the principal

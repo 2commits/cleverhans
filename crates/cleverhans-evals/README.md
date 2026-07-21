@@ -1,7 +1,7 @@
 # cleverhans-evals
 
 Action-mapping eval harness for
-[CleverHans](https://github.com/nordalf/cleverhans) registries: cases pair an
+[CleverHans](https://github.com/2commits/cleverhans) registries: cases pair an
 utterance + context with the expected action (or expected decline), and the
 suite runs them through the real agent loop against your provider.
 

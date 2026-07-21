@@ -1,6 +1,6 @@
 # @cleverhans/node
 
-Host a [CleverHans](https://github.com/nordalf/cleverhans) propose-only
+Host a [CleverHans](https://github.com/2commits/cleverhans) propose-only
 agent from a Node.js backend. The agent never acts on your system: it
 proposes actions from your closed registry; your handlers execute only
 after explicit user confirmation, under the principal you bound to the

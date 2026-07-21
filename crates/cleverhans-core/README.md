@@ -1,6 +1,6 @@
 # cleverhans-core
 
-Reference backend for the [CleverHans](https://github.com/nordalf/cleverhans)
+Reference backend for the [CleverHans](https://github.com/2commits/cleverhans)
 propose-only HITL agent protocol: the registry (+ declarative schema), the
 validation pipeline, the propose-only state machine, the agent loop, and the
 seam traits an application implements (`ActionHandler`, `DryRunHandler`,

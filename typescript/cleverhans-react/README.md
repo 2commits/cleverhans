@@ -1,7 +1,7 @@
 # @cleverhans/react
 
 Headless React frontend for
-[CleverHans](https://github.com/nordalf/cleverhans) — session store, hooks,
+[CleverHans](https://github.com/2commits/cleverhans) — session store, hooks,
 block router, proposal primitives, and the WebSocket transport. No styles,
 no components you didn't write; pair with
 [`@cleverhans/ui`](https://www.npmjs.com/package/@cleverhans/ui) for the

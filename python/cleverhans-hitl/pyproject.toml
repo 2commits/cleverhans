@@ -22,8 +22,8 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/nordalf/cleverhans"
-Specification = "https://github.com/nordalf/cleverhans/blob/main/spec/SPEC.md"
+Repository = "https://github.com/2commits/cleverhans"
+Specification = "https://github.com/2commits/cleverhans/blob/main/spec/SPEC.md"
 
 [tool.maturin]
 manifest-path = "../../crates/cleverhans-py/Cargo.toml"

@@ -1,7 +1,7 @@
 # cleverhans-ws
 
 WebSocket + JSON transport binding for the
-[CleverHans](https://github.com/nordalf/cleverhans) envelope, as an axum
+[CleverHans](https://github.com/2commits/cleverhans) envelope, as an axum
 router. Two mounts:
 
 - `agent_router_from_extension("/agent", agent)` — your existing tower/axum

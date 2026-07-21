@@ -15,4 +15,4 @@ npm install @cleverhans/react @cleverhans/ui
    then key custom blocks with `BlockComponents<BlockSlotsMap>`.
 
 Headless instead (your own UI): see
-https://github.com/nordalf/cleverhans/blob/main/docs/quickstart-react.md
+https://github.com/2commits/cleverhans/blob/main/docs/quickstart-react.md

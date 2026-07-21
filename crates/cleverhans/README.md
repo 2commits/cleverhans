@@ -1,6 +1,6 @@
 # cleverhans
 
-Batteries-included facade for [CleverHans](https://github.com/nordalf/cleverhans),
+Batteries-included facade for [CleverHans](https://github.com/2commits/cleverhans),
 a propose-only, in-app, human-in-the-loop agent framework. The agent never
 acts on your system: it proposes actions from your closed registry; your app
 executes through its own authorized path after explicit user confirmation.
@@ -36,4 +36,4 @@ WebSocket binding), `anthropic` / `ollama` (LLM providers + `llm::from_env`),
 `evals` (action-mapping eval harness), `test-util` (deterministic doubles).
 
 Protocol spec and integration guides:
-[github.com/nordalf/cleverhans](https://github.com/nordalf/cleverhans).
+[github.com/2commits/cleverhans](https://github.com/2commits/cleverhans).

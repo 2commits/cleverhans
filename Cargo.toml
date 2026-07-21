@@ -40,7 +40,7 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/nordalf/cleverhans"
+repository = "https://github.com/2commits/cleverhans"
 
 [workspace.dependencies]
 # Internal crates carry both `path` (workspace builds) and `version`

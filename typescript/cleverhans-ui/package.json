@@ -5,7 +5,7 @@
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nordalf/cleverhans",
+    "url": "https://github.com/2commits/cleverhans",
     "directory": "typescript/cleverhans-ui"
   },
   "type": "module",

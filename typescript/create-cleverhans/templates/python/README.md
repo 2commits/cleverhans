@@ -22,4 +22,4 @@ Next steps:
 4. Keep `eval-cases.json` growing with every action (happy path, no
    selection, near-boundary decline).
 
-Guides: https://github.com/nordalf/cleverhans/tree/main/docs
+Guides: https://github.com/2commits/cleverhans/tree/main/docs
