@@ -27,13 +27,35 @@ rm -rf cleverhans-node/artifacts
 gh run download "$RUN_ID" --repo 2commits/cleverhans \
   --pattern 'bindings-*' --dir cleverhans-node/artifacts
 
+# Prepare only: napi injects optionalDependencies + copies binaries, but
+# must not publish itself — its captured `npm publish` cannot complete the
+# interactive OTP/browser auth this bootstrap depends on.
 (cd cleverhans-node \
   && pnpm exec napi create-npm-dirs \
   && pnpm exec napi artifacts --output-dir artifacts \
-  && pnpm exec napi prepublish -t npm --no-gh-release)
+  && pnpm exec napi prepublish -t npm --no-gh-release --skip-optional-publish)
+
+published() {
+  npm view "$1@$VERSION" version > /dev/null 2>&1
+}
+
+# Platform packages, interactively (npm opens the browser / prompts OTP).
+for dir in cleverhans-node/npm/*/; do
+  name="$(node -p "require('./$dir/package.json').name")"
+  if published "$name"; then
+    echo "== $name@$VERSION already on npm — skipping"
+    continue
+  fi
+  (cd "$dir" && npm publish --access public)
+done
 
 # Main packages: pnpm pack applies publishConfig + rewrites workspace:*.
 for p in cleverhans-react cleverhans-ui cleverhans-node create-cleverhans; do
+  name="$(node -p "require('./$p/package.json').name")"
+  if published "$name"; then
+    echo "== $name@$VERSION already on npm — skipping"
+    continue
+  fi
   (cd "$p" && pnpm pack --out package.tgz && npm publish package.tgz --access public)
 done
 
