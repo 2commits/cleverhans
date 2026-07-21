@@ -26,3 +26,6 @@ is the practical integration layer over it.
 - [Adding an action](adding-actions.md) — the registry edit → codegen →
   handlers → UI → evals loop
 - [Troubleshooting](troubleshooting.md)
+- [Releasing](releasing.md) — semver tags, prerelease dist-tags, the
+  `scripts/set-version.sh` bump
+
