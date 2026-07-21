@@ -1,0 +1,25 @@
+{
+  "spec_version": "0.1",
+  "blocks": [
+    {
+      "block_type": "confirm",
+      "slots": [
+        { "name": "title", "type": "string", "required": true },
+        { "name": "detail", "type": "string", "required": false }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "record.archive",
+      "description": "Archive the currently selected record",
+      "params": [
+        { "name": "recordId", "type": "string", "source": "context", "required": true }
+      ],
+      "block_type": "confirm",
+      "mutates": true,
+      "authz_key": "record.archive"
+    }
+  ],
+  "context_params": { "recordId": "selected_record_id" }
+}

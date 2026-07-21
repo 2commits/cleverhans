@@ -1,0 +1,20 @@
+[
+  {
+    "name": "archive from detail view",
+    "utterance": "archive this",
+    "context": { "route": "/records/r-1", "selected_record_id": "r-1", "view_type": "detail" },
+    "expected": { "kind": "action", "action_id": "record.archive" }
+  },
+  {
+    "name": "nothing selected declines",
+    "utterance": "archive this",
+    "context": { "route": "/records", "selected_record_id": null, "view_type": "list" },
+    "expected": { "kind": "decline" }
+  },
+  {
+    "name": "off-registry declines",
+    "utterance": "email this record to the team",
+    "context": { "route": "/records/r-1", "selected_record_id": "r-1", "view_type": "detail" },
+    "expected": { "kind": "decline" }
+  }
+]

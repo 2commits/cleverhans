@@ -1,0 +1,29 @@
+{
+  "name": "create-cleverhans",
+  "version": "0.1.0",
+  "description": "Scaffold CleverHans (propose-only HITL agent) into an existing project: registry, host stub, codegen config, eval cases",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nordalf/cleverhans",
+    "directory": "typescript/create-cleverhans"
+  },
+  "type": "module",
+  "bin": {
+    "create-cleverhans": "index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "templates"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "scripts": {
+    "test": "node test.mjs",
+    "typecheck": "node --check index.mjs"
+  }
+}
