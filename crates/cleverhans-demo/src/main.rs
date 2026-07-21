@@ -22,7 +22,7 @@ use axum::routing::get;
 
 use cleverhans::prelude::*;
 
-use registry::{AllowAll, DemoUser, Store, build_registry, context_resolver};
+use registry::{DemoUser, Store, build_registry, context_resolver};
 
 fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
     let store = Store::seeded();

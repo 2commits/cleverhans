@@ -30,8 +30,8 @@
 //! - `test-util` — deterministic doubles ([`test_util`]) for offline tests
 
 pub use cleverhans_core::{
-    JsonMap, SPEC_VERSION, agent, envelope, error, proposal, registry, schema, seams, slots,
-    spec_version_compatible, validation,
+    JsonMap, SPEC_VERSION, agent, async_trait, envelope, error, proposal, registry, schema, seams,
+    slots, spec_version_compatible, validation,
 };
 
 #[cfg(feature = "test-util")]
@@ -60,16 +60,18 @@ pub mod llm;
 pub mod prelude {
     pub use cleverhans_core::JsonMap;
     pub use cleverhans_core::agent::{Agent, AgentConfig, Session};
+    pub use cleverhans_core::async_trait;
     pub use cleverhans_core::envelope::{
         ActionProposal, ClientEvent, Context, DryRunPreview, ServerEvent,
     };
     pub use cleverhans_core::error::{HandlerError, LlmError, RegistryError, ValidationFailure};
     pub use cleverhans_core::registry::{
-        ActionDef, BlockDef, ParamSource, ParamSpec, Registry, RegistryBuilder, SlotSpec, ValueType,
+        ActionBinding, ActionDef, BlockDef, ParamSource, ParamSpec, Registry, RegistryBuilder,
+        SlotSpec, ValueType,
     };
     pub use cleverhans_core::schema::{MappedContextResolver, RegistrySchema};
     pub use cleverhans_core::seams::{
-        ActionHandler, AuthzDecision, AuthzResolver, ContextParamResolver, DryRunHandler,
+        ActionHandler, AllowAll, AuthzDecision, AuthzResolver, ContextParamResolver, DryRunHandler,
         LlmProvider, SlotBuilder, static_slots, typed_dry_run, typed_handler,
     };
     pub use cleverhans_core::slots;

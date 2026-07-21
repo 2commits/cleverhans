@@ -302,9 +302,48 @@ pub struct RegistryBuilder<P> {
 
 struct Attachment<P> {
     id: String,
-    handler: Arc<dyn ActionHandler<P>>,
+    /// `None` only for a [`RegistryBuilder::bind`] that never set a handler
+    /// — reported as [`RegistryError::MissingHandler`] at build.
+    handler: Option<Arc<dyn ActionHandler<P>>>,
     dry_run: Option<Arc<dyn DryRunHandler<P>>>,
     slot_builder: Option<Arc<dyn SlotBuilder>>,
+}
+
+/// Accumulates one action's handlers for [`RegistryBuilder::bind`].
+pub struct ActionBinding<P> {
+    handler: Option<Arc<dyn ActionHandler<P>>>,
+    dry_run: Option<Arc<dyn DryRunHandler<P>>>,
+    slot_builder: Option<Arc<dyn SlotBuilder>>,
+}
+
+impl<P> ActionBinding<P> {
+    /// The app's execution path — required.
+    #[must_use]
+    pub fn handler(mut self, handler: impl ActionHandler<P> + 'static) -> Self {
+        self.handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// The side-effect-free preview — required iff the action mutates.
+    #[must_use]
+    pub fn dry_run(mut self, dry_run: impl DryRunHandler<P> + 'static) -> Self {
+        self.dry_run = Some(Arc::new(dry_run));
+        self
+    }
+
+    /// Slot content from params/preview; omit to render empty slots.
+    #[must_use]
+    pub fn slots(mut self, slot_builder: impl SlotBuilder + 'static) -> Self {
+        self.slot_builder = Some(Arc::new(slot_builder));
+        self
+    }
+
+    /// Fixed slot content — [`ActionBinding::slots`] over
+    /// [`static_slots`](crate::seams::static_slots).
+    #[must_use]
+    pub fn static_slots(self, slots: JsonMap) -> Self {
+        self.slots(crate::seams::static_slots(slots))
+    }
 }
 
 impl<P> RegistryBuilder<P> {
@@ -323,7 +362,8 @@ impl<P> RegistryBuilder<P> {
 
     /// Binds handlers to a pending schema def by action ID. Infallible here;
     /// unknown, duplicate, or never-attached IDs are reported at
-    /// [`RegistryBuilder::build`].
+    /// [`RegistryBuilder::build`]. [`RegistryBuilder::bind`] is the named,
+    /// unwrapped form of the same registration.
     #[must_use]
     pub fn attach(
         mut self,
@@ -334,9 +374,71 @@ impl<P> RegistryBuilder<P> {
     ) -> Self {
         self.attachments.push(Attachment {
             id: id.into(),
-            handler,
+            handler: Some(handler),
             dry_run,
             slot_builder,
+        });
+        self
+    }
+
+    /// [`RegistryBuilder::attach`] with named setters instead of positional
+    /// `Option<Arc<...>>` slots. Each setter takes any impl — closure,
+    /// struct, or an already-`Arc`'d handler (e.g. from
+    /// [`typed_handler`](crate::seams::typed_handler)) — so registrations
+    /// carry no `Some(Arc::new(...))` wrapping. A binding without
+    /// [`ActionBinding::handler`] fails [`RegistryBuilder::build`] with
+    /// [`RegistryError::MissingHandler`].
+    ///
+    /// ```
+    /// use cleverhans_core::envelope::DryRunPreview;
+    /// use cleverhans_core::error::HandlerError;
+    /// use cleverhans_core::registry::Registry;
+    /// use cleverhans_core::schema::RegistrySchema;
+    /// use cleverhans_core::{JsonMap, slots};
+    /// # let schema = RegistrySchema {
+    /// #     spec_version: cleverhans_core::SPEC_VERSION.to_owned(),
+    /// #     blocks: vec![cleverhans_core::registry::BlockDef {
+    /// #         block_type: "confirm".to_owned(), slots: vec![] }],
+    /// #     actions: vec![cleverhans_core::registry::ActionDef {
+    /// #         id: "doc.publish".to_owned(), description: "publish".to_owned(),
+    /// #         params: vec![], block_type: "confirm".to_owned(),
+    /// #         mutates: true, authz_key: "doc.publish".to_owned() }],
+    /// #     context_params: Default::default(),
+    /// # };
+    ///
+    /// #[derive(Clone)]
+    /// struct User;
+    ///
+    /// let registry = cleverhans_core::registry::RegistryBuilder::<User>::from_schema(schema)
+    ///     .bind("doc.publish", |action| {
+    ///         action
+    ///             .handler(|params: JsonMap, _: User| async move {
+    ///                 Ok(serde_json::Value::Object(params))
+    ///             })
+    ///             .dry_run(|_: JsonMap, _: User| async move {
+    ///                 Ok(DryRunPreview::default())
+    ///             })
+    ///             .static_slots(slots! {})
+    ///     })
+    ///     .build()
+    ///     .expect("valid registry");
+    /// ```
+    #[must_use]
+    pub fn bind(
+        mut self,
+        id: impl Into<String>,
+        configure: impl FnOnce(ActionBinding<P>) -> ActionBinding<P>,
+    ) -> Self {
+        let binding = configure(ActionBinding {
+            handler: None,
+            dry_run: None,
+            slot_builder: None,
+        });
+        self.attachments.push(Attachment {
+            id: id.into(),
+            handler: binding.handler,
+            dry_run: binding.dry_run,
+            slot_builder: binding.slot_builder,
         });
         self
     }
@@ -397,9 +499,12 @@ impl<P> RegistryBuilder<P> {
                     RegistryError::UnknownAttachment(attachment.id)
                 });
             };
+            let Some(handler) = attachment.handler else {
+                return Err(RegistryError::MissingHandler(attachment.id));
+            };
             self.actions.push(ActionRegistration {
                 def: self.pending.remove(at),
-                handler: attachment.handler,
+                handler,
                 dry_run: attachment.dry_run,
                 slot_builder: attachment.slot_builder,
             });
@@ -538,7 +643,7 @@ mod tests {
         use super::*;
         use crate::schema::RegistrySchema;
 
-        fn schema() -> RegistrySchema {
+        pub(super) fn schema() -> RegistrySchema {
             RegistrySchema {
                 spec_version: crate::SPEC_VERSION.to_owned(),
                 blocks: vec![confirm_block()],
@@ -550,7 +655,7 @@ mod tests {
             }
         }
 
-        struct NoopDryRun;
+        pub(super) struct NoopDryRun;
 
         #[async_trait]
         impl DryRunHandler<()> for NoopDryRun {
@@ -627,6 +732,48 @@ mod tests {
                 .build();
 
             assert!(matches!(result, Err(RegistryError::MissingDryRun(id)) if id == "a.b"));
+        }
+    }
+
+    mod bind {
+        use super::*;
+
+        #[test]
+        fn binds_impls_without_wrapping() {
+            let registry = RegistryBuilder::from_schema(schema_path::schema())
+                .bind("a.b", |action| {
+                    action
+                        .handler(NoopHandler)
+                        .dry_run(schema_path::NoopDryRun)
+                        .static_slots(crate::slots! { "title": "ok" })
+                })
+                .build()
+                .expect("valid registry");
+
+            assert!(registry.action("a.b").is_some());
+        }
+
+        #[test]
+        fn arc_handlers_pass_through() {
+            let handler: Arc<dyn ActionHandler<()>> = Arc::new(NoopHandler);
+            let dry_run: Arc<dyn DryRunHandler<()>> = Arc::new(schema_path::NoopDryRun);
+
+            let result = RegistryBuilder::from_schema(schema_path::schema())
+                .bind("a.b", |action| action.handler(handler).dry_run(dry_run))
+                .build();
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn binding_without_handler_fails_build() {
+            let result = RegistryBuilder::<()>::from_schema(schema_path::schema())
+                .bind("a.b", |action| {
+                    action.static_slots(crate::slots! { "title": "no handler" })
+                })
+                .build();
+
+            assert!(matches!(result, Err(RegistryError::MissingHandler(id)) if id == "a.b"));
         }
     }
 

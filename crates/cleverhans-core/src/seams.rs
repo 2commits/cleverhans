@@ -105,6 +105,33 @@ where
     }
 }
 
+/// An `Arc`'d handler is a handler, so helpers that return
+/// `Arc<dyn ActionHandler<P>>` (e.g. [`typed_handler`]) and bare
+/// closures/structs pass through the same `impl ActionHandler` surface
+/// (see [`RegistryBuilder::bind`](crate::registry::RegistryBuilder::bind)).
+#[async_trait]
+impl<P: Send + Sync> ActionHandler<P> for Arc<dyn ActionHandler<P>> {
+    async fn execute(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<serde_json::Value, HandlerError> {
+        (**self).execute(params, principal).await
+    }
+}
+
+/// See the [`ActionHandler`] impl for `Arc<dyn ActionHandler<P>>`.
+#[async_trait]
+impl<P: Send + Sync> DryRunHandler<P> for Arc<dyn DryRunHandler<P>> {
+    async fn dry_run(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<DryRunPreview, HandlerError> {
+        (**self).dry_run(params, principal).await
+    }
+}
+
 fn parse_params<T: DeserializeOwned>(params: &JsonMap) -> Result<T, HandlerError> {
     serde_json::from_value(serde_json::Value::Object(params.clone())).map_err(|err| {
         HandlerError::Internal(format!(
@@ -222,6 +249,54 @@ pub trait AuthzResolver<P>: Send + Sync {
     async fn authorize(&self, principal: &P, action_id: &str, params: &JsonMap) -> AuthzDecision;
 }
 
+/// Async closures are authz resolvers, mirroring the [`ActionHandler`]
+/// blanket impl — apps bridging an existing permission check don't need a
+/// trait impl.
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::JsonMap;
+/// use cleverhans_core::seams::{AuthzDecision, AuthzResolver};
+///
+/// #[derive(Clone)]
+/// struct User {
+///     admin: bool,
+/// }
+///
+/// let authz: Arc<dyn AuthzResolver<User>> =
+///     Arc::new(|user: User, action_id: String, _params: JsonMap| async move {
+///         if user.admin || !action_id.starts_with("admin.") {
+///             AuthzDecision::Allow
+///         } else {
+///             AuthzDecision::Deny("admins only".to_owned())
+///         }
+///     });
+/// ```
+#[async_trait]
+impl<P, F, Fut> AuthzResolver<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(P, String, JsonMap) -> Fut + Send + Sync,
+    Fut: Future<Output = AuthzDecision> + Send,
+{
+    async fn authorize(&self, principal: &P, action_id: &str, params: &JsonMap) -> AuthzDecision {
+        self(principal.clone(), action_id.to_owned(), params.clone()).await
+    }
+}
+
+/// An [`AuthzResolver`] that allows every action, for demos, tests, and
+/// apps whose transport-level auth is the whole permission model. Production
+/// apps with per-action permissions implement the trait (or pass a closure)
+/// over their real permission system.
+pub struct AllowAll;
+
+#[async_trait]
+impl<P: Send + Sync> AuthzResolver<P> for AllowAll {
+    async fn authorize(&self, _: &P, _: &str, _: &JsonMap) -> AuthzDecision {
+        AuthzDecision::Allow
+    }
+}
+
 /// Extracts context-sourced param values from the current context snapshot
 /// (spec §9.5). Only the framework calls this — the model never writes
 /// context-sourced params.
@@ -278,6 +353,14 @@ where
 {
     fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
         self(params, preview)
+    }
+}
+
+/// An `Arc`'d slot builder is a slot builder; see the matching
+/// [`ActionHandler`] impl for `Arc<dyn ActionHandler<P>>`.
+impl SlotBuilder for Arc<dyn SlotBuilder> {
+    fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
+        (**self).build(params, preview)
     }
 }
 

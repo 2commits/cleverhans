@@ -438,7 +438,12 @@ pub fn build_agent(
             script: vector.authz.clone(),
             calls: AtomicUsize::new(0),
         }),
-        Arc::new(fixture.registry.context_resolver()),
+        Arc::new(
+            fixture
+                .registry
+                .context_resolver()
+                .expect("fixture registries map every context param"),
+        ),
     );
     (Arc::new(agent), log)
 }

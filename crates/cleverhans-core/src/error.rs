@@ -38,6 +38,9 @@ pub enum RegistryError {
     /// The same action was attached more than once.
     #[error("action `{0}` attached twice")]
     DuplicateAttachment(String),
+    /// A [`crate::registry::RegistryBuilder::bind`] never set a handler.
+    #[error("binding for `{0}` sets no handler")]
+    MissingHandler(String),
 }
 
 /// A propose-time or confirm-time validation failure (spec §7.1).

@@ -212,20 +212,6 @@ impl DryRunHandler<DemoUser> for DeleteByStatus {
     }
 }
 
-pub struct AllowAll;
-
-#[async_trait]
-impl AuthzResolver<DemoUser> for AllowAll {
-    async fn authorize(
-        &self,
-        _principal: &DemoUser,
-        _action_id: &str,
-        _params: &JsonMap,
-    ) -> AuthzDecision {
-        AuthzDecision::Allow
-    }
-}
-
 /// The demo's declarative registry document (spec §4). One source, four
 /// consumers: this builder, the codegen CLI, the conformance fixtures, and
 /// [`crate::generated`].
@@ -237,45 +223,48 @@ pub fn demo_schema() -> RegistrySchema {
 /// `documentId` comes from the selected record in context — the model never
 /// names a document. The mapping lives in `registry.json`.
 pub fn context_resolver() -> MappedContextResolver {
-    demo_schema().context_resolver()
+    demo_schema()
+        .context_resolver()
+        .expect("demo registry.json maps every context param")
 }
 
 /// Builds the demo registry over a shared store: declarative defs from
 /// `registry.json`, handlers attached here by generated action ID.
 pub fn build_registry(store: &Store) -> Registry<DemoUser> {
     RegistryBuilder::from_schema(demo_schema())
-        .attach(
-            action_ids::DOCUMENT_RENAME,
-            rename_handler(store),
-            Some(Arc::new(OneDocPreview(store.clone()))),
-            // The dry-run summary names the current title; `detail` carries
-            // the utterance-sourced new title so the card shows both.
-            Some(Arc::new(|params: &JsonMap, _: Option<&DryRunPreview>| {
-                let new_title = params.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                slots! {
-                    "title": "Rename document",
-                    "detail": format!("New title: \u{201c}{new_title}\u{201d}"),
-                }
-            })),
-        )
-        .attach(
-            action_ids::DOCUMENT_PUBLISH,
-            set_status_handler(store, DocStatus::Published),
-            Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(static_slots(slots! { "title": "Publish document" })),
-        )
-        .attach(
-            action_ids::DOCUMENT_ARCHIVE,
-            set_status_handler(store, DocStatus::Archived),
-            Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(static_slots(slots! { "title": "Archive document" })),
-        )
-        .attach(
-            action_ids::DOCUMENTS_DELETE_BY_STATUS,
-            Arc::new(DeleteByStatus(store.clone())),
-            Some(Arc::new(DeleteByStatus(store.clone()))),
-            Some(static_slots(slots! { "title": "Bulk delete documents" })),
-        )
+        .bind(action_ids::DOCUMENT_RENAME, |action| {
+            action
+                .handler(rename_handler(store))
+                .dry_run(OneDocPreview(store.clone()))
+                // The dry-run summary names the current title; `detail`
+                // carries the utterance-sourced new title so the card shows
+                // both.
+                .slots(|params: &JsonMap, _: Option<&DryRunPreview>| {
+                    let new_title = params.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                    slots! {
+                        "title": "Rename document",
+                        "detail": format!("New title: \u{201c}{new_title}\u{201d}"),
+                    }
+                })
+        })
+        .bind(action_ids::DOCUMENT_PUBLISH, |action| {
+            action
+                .handler(set_status_handler(store, DocStatus::Published))
+                .dry_run(OneDocPreview(store.clone()))
+                .static_slots(slots! { "title": "Publish document" })
+        })
+        .bind(action_ids::DOCUMENT_ARCHIVE, |action| {
+            action
+                .handler(set_status_handler(store, DocStatus::Archived))
+                .dry_run(OneDocPreview(store.clone()))
+                .static_slots(slots! { "title": "Archive document" })
+        })
+        .bind(action_ids::DOCUMENTS_DELETE_BY_STATUS, |action| {
+            action
+                .handler(DeleteByStatus(store.clone()))
+                .dry_run(DeleteByStatus(store.clone()))
+                .static_slots(slots! { "title": "Bulk delete documents" })
+        })
         .build()
         .expect("demo registry is valid")
 }

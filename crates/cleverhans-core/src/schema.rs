@@ -68,6 +68,20 @@ pub enum SchemaError {
         /// The rejected path.
         path: String,
     },
+    /// A context-sourced param has no `context_params` mapping — caught when
+    /// the app opts into [`RegistrySchema::context_resolver`], so the gap
+    /// surfaces at startup instead of as an unresolvable param on every
+    /// proposal of that action.
+    #[error(
+        "action `{action}` param `{param}` is context-sourced but has no \
+         context_params mapping"
+    )]
+    UnmappedContextParam {
+        /// The action whose param cannot be filled.
+        action: String,
+        /// The unmapped context-sourced param.
+        param: String,
+    },
 }
 
 /// The path grammar [`MappedContextResolver`] resolves: one of the fixed
@@ -119,10 +133,29 @@ impl RegistrySchema {
     }
 
     /// A [`ContextParamResolver`] over this document's `context_params`
-    /// mapping.
-    #[must_use]
-    pub fn context_resolver(&self) -> MappedContextResolver {
-        MappedContextResolver::new(self.context_params.clone())
+    /// mapping, checked for coverage: every context-sourced param of every
+    /// action must have a mapping, since the mapped resolver is the only
+    /// thing that will ever fill them. Apps with richer needs implement
+    /// [`ContextParamResolver`] themselves and never call this.
+    ///
+    /// # Errors
+    ///
+    /// [`SchemaError::UnmappedContextParam`] naming the first uncovered
+    /// param.
+    pub fn context_resolver(&self) -> Result<MappedContextResolver, SchemaError> {
+        for action in &self.actions {
+            for param in &action.params {
+                if param.source == crate::registry::ParamSource::Context
+                    && !self.context_params.contains_key(&param.name)
+                {
+                    return Err(SchemaError::UnmappedContextParam {
+                        action: action.id.clone(),
+                        param: param.name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(MappedContextResolver::new(self.context_params.clone()))
     }
 }
 
@@ -277,6 +310,29 @@ mod tests {
                 ),
                 "path `{bad}` must be rejected at load"
             );
+        }
+    }
+
+    mod checked_resolver {
+        use super::*;
+
+        #[test]
+        fn covers_every_context_param() {
+            let schema = RegistrySchema::from_json(&document()).expect("valid document");
+
+            assert!(schema.context_resolver().is_ok());
+        }
+
+        #[test]
+        fn reports_unmapped_context_param_at_startup() {
+            let mut schema = RegistrySchema::from_json(&document()).expect("valid document");
+            schema.context_params.clear();
+
+            assert!(matches!(
+                schema.context_resolver(),
+                Err(SchemaError::UnmappedContextParam { action, param })
+                    if action == "record.remove" && param == "recordId"
+            ));
         }
     }
 

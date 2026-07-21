@@ -45,6 +45,11 @@ pub fn spec_version_compatible(version: &str) -> bool {
 /// JSON object type used for `params`, `slots`, and extension maps.
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
+/// Re-exported so trait-impl seam registrations (`#[async_trait]` on
+/// [`seams::ActionHandler`] etc.) never require integrators to add and
+/// version-match the `async-trait` crate themselves.
+pub use async_trait::async_trait;
+
 #[doc(hidden)]
 pub mod __private {
     pub use serde_json;
