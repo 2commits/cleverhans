@@ -340,11 +340,15 @@ impl PyAgent {
                 .collect();
 
         let context_resolver: Arc<dyn ContextParamResolver> = match resolve_context_param {
+            // The callback covers params the mapping doesn't, so the
+            // fallback stays unchecked — coverage is the callback's job.
             Some(callable) => Arc::new(PyContextResolver {
                 callable,
-                fallback: schema.context_resolver(),
+                fallback: cleverhans_core::schema::MappedContextResolver::new(
+                    schema.context_params.clone(),
+                ),
             }),
-            None => Arc::new(schema.context_resolver()),
+            None => Arc::new(schema.context_resolver().map_err(value_err)?),
         };
         let authz: Arc<dyn AuthzResolver<FfiPrincipal>> = match authorize {
             Some(callable) => Arc::new(PyAuthz(callable)),
@@ -483,10 +487,19 @@ impl PyEventStream {
     }
 }
 
+/// Generates a typed module (`typescript` | `python` | `rust`) from a
+/// registry document — codegen without a Rust toolchain. Fronted by
+/// `cleverhans_agent.generate_types`.
+#[pyfunction]
+fn generate_types(registry_json: &str, target: &str) -> PyResult<String> {
+    cleverhans_ffi::generate_types(registry_json, target).map_err(value_err)
+}
+
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyAgent>()?;
     module.add_class::<PySession>()?;
     module.add_class::<PyEventStream>()?;
+    module.add_function(wrap_pyfunction!(generate_types, module)?)?;
     Ok(())
 }

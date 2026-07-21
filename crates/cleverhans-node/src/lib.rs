@@ -204,6 +204,14 @@ fn invalid(err: impl std::fmt::Display) -> Error {
     Error::new(Status::InvalidArg, err.to_string())
 }
 
+/// Generates a typed module (`typescript` | `python` | `rust`) from a
+/// registry document — codegen without a Rust toolchain. The TS wrapper and
+/// the `cleverhans-codegen` bin script front this.
+#[napi]
+pub fn generate_types(registry_json: String, target: String) -> Result<String> {
+    cleverhans_ffi::generate_types(&registry_json, &target).map_err(invalid)
+}
+
 /// The agent, stateless and shared across sessions.
 #[napi]
 pub struct Agent {
@@ -275,7 +283,9 @@ impl Agent {
                 ))
             })
             .collect::<Result<HashMap<_, _>>>()?;
-        let context_resolver = schema.context_resolver();
+        let context_resolver = schema
+            .context_resolver()
+            .map_err(|err| invalid(err.to_string()))?;
         let registry =
             assemble_registry(schema, handlers, dry_runs, slot_builders).map_err(invalid)?;
         Ok(Self {

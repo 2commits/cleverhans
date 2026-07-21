@@ -130,6 +130,35 @@ pub fn parse_agent_config(json: &str) -> Result<AgentConfig, serde_json::Error> 
     })
 }
 
+/// Generates a typed module from a registry document — the codegen CLI as a
+/// host-language call, so npm/PyPI consumers with prebuilt binaries never
+/// need a Rust toolchain to regenerate types. `target` is
+/// `typescript`/`ts`, `python`/`py`, or `rust`/`rs`.
+///
+/// # Errors
+///
+/// A human-readable message for a malformed document or unknown target.
+pub fn generate_types(schema_json: &str, target: &str) -> Result<String, String> {
+    let schema = RegistrySchema::from_json(schema_json).map_err(|err| err.to_string())?;
+    match target {
+        "typescript" | "ts" => Ok(cleverhans_codegen::typescript_module(
+            &schema.actions,
+            &schema.blocks,
+        )),
+        "python" | "py" => Ok(cleverhans_codegen::python_module(
+            &schema.actions,
+            &schema.blocks,
+        )),
+        "rust" | "rs" => Ok(cleverhans_codegen::rust_module(
+            &schema.actions,
+            &schema.blocks,
+        )),
+        other => Err(format!(
+            "unknown codegen target `{other}` (typescript | python | rust)"
+        )),
+    }
+}
+
 /// Assembles a registry from a declarative document plus host-language seam
 /// callbacks, validating coverage with errors that name the offending
 /// callback before the builder's own invariants run.
@@ -285,7 +314,7 @@ mod tests {
             Arc::new(registry),
             llm,
             Arc::new(AllowAll),
-            Arc::new(schema().context_resolver()),
+            Arc::new(schema().context_resolver().expect("mapped context params")),
         )
     }
 

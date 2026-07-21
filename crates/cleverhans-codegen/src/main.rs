@@ -4,7 +4,9 @@
 //! cargo run -p cleverhans-codegen -- --schema registry.json --ts out.ts --py out.py --rs out.rs
 //! ```
 //!
-//! With no output flag the TypeScript module goes to stdout.
+//! With no output flag the TypeScript module goes to stdout. `--check`
+//! writes nothing and fails if any named output is stale — CI's freshness
+//! gate.
 
 use std::process::ExitCode;
 
@@ -16,16 +18,22 @@ struct Args {
     ts: Option<String>,
     py: Option<String>,
     rs: Option<String>,
+    check: bool,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let (mut schema, mut ts, mut py, mut rs) = (None, None, None, None);
+    let mut check = false;
     while let Some(flag) = args.next() {
         let slot = match flag.as_str() {
             "--schema" => &mut schema,
             "--ts" => &mut ts,
             "--py" => &mut py,
             "--rs" => &mut rs,
+            "--check" => {
+                check = true;
+                continue;
+            }
             other => return Err(format!("unknown flag `{other}`")),
         };
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -38,7 +46,19 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         ts,
         py,
         rs,
+        check,
     })
+}
+
+fn emit(path: &str, module: &str, check: bool) -> Result<(), String> {
+    if check {
+        let current = std::fs::read_to_string(path).unwrap_or_default();
+        if current != module {
+            return Err(format!("{path} is stale — re-run without --check"));
+        }
+        return Ok(());
+    }
+    std::fs::write(path, module).map_err(|err| format!("write {path}: {err}"))
 }
 
 fn run(args: Args) -> Result<(), String> {
@@ -48,19 +68,23 @@ fn run(args: Args) -> Result<(), String> {
 
     let ts_module = typescript_module(&schema.actions, &schema.blocks);
     match &args.ts {
-        Some(path) => {
-            std::fs::write(path, &ts_module).map_err(|err| format!("write {path}: {err}"))?;
-        }
-        None if args.py.is_none() && args.rs.is_none() => print!("{ts_module}"),
+        Some(path) => emit(path, &ts_module, args.check)?,
+        None if args.py.is_none() && args.rs.is_none() && !args.check => print!("{ts_module}"),
         None => {}
     }
     if let Some(path) = &args.py {
-        let py_module = python_module(&schema.actions, &schema.blocks);
-        std::fs::write(path, &py_module).map_err(|err| format!("write {path}: {err}"))?;
+        emit(
+            path,
+            &python_module(&schema.actions, &schema.blocks),
+            args.check,
+        )?;
     }
     if let Some(path) = &args.rs {
-        let rs_module = rust_module(&schema.actions, &schema.blocks);
-        std::fs::write(path, &rs_module).map_err(|err| format!("write {path}: {err}"))?;
+        emit(
+            path,
+            &rust_module(&schema.actions, &schema.blocks),
+            args.check,
+        )?;
     }
     Ok(())
 }
@@ -71,7 +95,8 @@ fn main() -> ExitCode {
         Err(message) => {
             eprintln!("cleverhans-codegen: {message}");
             eprintln!(
-                "usage: cleverhans-codegen --schema <registry.json> [--ts <out.ts>] [--py <out.py>] [--rs <out.rs>]"
+                "usage: cleverhans-codegen --schema <registry.json> \
+                 [--ts <out.ts>] [--py <out.py>] [--rs <out.rs>] [--check]"
             );
             ExitCode::FAILURE
         }

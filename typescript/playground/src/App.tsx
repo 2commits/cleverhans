@@ -27,6 +27,10 @@ import { FloatingChat } from "@cleverhans/ui";
 import "@cleverhans/ui/styles.css";
 import "./app.css";
 
+// Codegen output (`pnpm codegen`): action IDs stay a closed union, so the
+// switch below is typo-proof against the registry.
+import { type ActionId } from "./generated/registry";
+
 interface Doc {
   id: string;
   title: string;
@@ -56,7 +60,7 @@ function applyResults(seed: Doc[], proposals: readonly ProposalView[]): Doc[] {
       continue;
     }
     const result = view.result as Record<string, unknown>;
-    switch (view.proposal.action_id) {
+    switch (view.proposal.action_id as ActionId) {
       case "document.rename": {
         const id = str(result["id"]);
         const title = str(result["title"]);
