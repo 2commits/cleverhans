@@ -5,8 +5,9 @@ name: Release
 #   npm       — @cleverhans/react, @cleverhans/ui, @cleverhans/node (+ per-platform binaries)
 #   PyPI      — cleverhans-hitl abi3 wheels (linux x64/arm64, macOS x64/arm64, windows x64) + sdist
 #
-# Required repo config: CARGO_REGISTRY_TOKEN and NPM_TOKEN secrets; PyPI
-# trusted publishing for this workflow (no token).
+# Required repo config: a `release` GitHub environment holding the
+# CARGO_REGISTRY_TOKEN and NPM_TOKEN secrets; PyPI trusted publishing for
+# this workflow bound to that same environment (no token).
 
 on:
   push:
@@ -18,6 +19,7 @@ permissions:
 jobs:
   crates:
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
       - name: Install protoc
@@ -71,6 +73,7 @@ jobs:
   npm:
     needs: npm-native
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -160,7 +163,7 @@ jobs:
   pypi:
     needs: [pypi-wheels, pypi-sdist]
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: release
     permissions:
       id-token: write
     steps:
