@@ -1,6 +1,6 @@
 {
   "name": "@cleverhans/node",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Host a CleverHans propose-only agent from a Node.js backend",
   "license": "MIT OR Apache-2.0",
   "repository": {
