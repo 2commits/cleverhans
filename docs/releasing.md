@@ -52,7 +52,15 @@ and re-push the tag. Use **Re-run failed jobs** in the Actions UI:
 
 ## One-time registry setup
 
-`release` GitHub environment with `CARGO_REGISTRY_TOKEN` + `NPM_TOKEN`;
-`@cleverhans` org on npm; PyPI trusted publisher for `cleverhans-hitl`
-(repo `2commits/cleverhans`, workflow `release.yml`, environment
-`release`).
+- **crates.io** — `CARGO_REGISTRY_TOKEN` secret in the `release` GitHub
+  environment (crates.io has no OIDC yet).
+- **npm** — the `cleverhans` org, then a **trusted publisher** on every
+  package (main four + the five platform packages + `create-cleverhans`):
+  org `2commits`, repo `cleverhans`, workflow `release.yml`, environment
+  `release`. No token: npm requires 2FA for token publishes now, so CI
+  authenticates via OIDC and provenance comes free. If a package doesn't
+  exist yet and the UI won't accept a trusted publisher for it, publish
+  its first version manually (`npm publish --access public` + OTP), then
+  configure the trusted publisher.
+- **PyPI** — trusted publisher for `cleverhans-hitl`: repo
+  `2commits/cleverhans`, workflow `release.yml`, environment `release`.
