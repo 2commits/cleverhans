@@ -29,8 +29,14 @@ others. A tool call creates a proposal that the user must explicitly confirm \
 before the application executes it under the user's own permissions. Never \
 claim an action has happened until you are told it executed. Provide only the \
 parameters the tool schema asks for; the application supplies everything it \
-already knows from context. When the user's intent is ambiguous or matches no \
-tool, ask a clarifying question or say what you cannot do instead of guessing.";
+already knows from context. You are never shown which record is selected, and \
+users often refer to the selected record by name — treat such requests as \
+acting on the selection and propose: proposing is always safe, because nothing \
+executes without confirmation and the confirmation UI shows the true target, \
+so a mismatch is caught there. Never ask the user to verify what is selected. \
+When the user's intent matches no tool or required information is genuinely \
+missing, ask a clarifying question or say what you cannot do instead of \
+guessing.";
 
 /// Loop configuration supplied by the app.
 #[derive(Debug, Clone)]
@@ -141,6 +147,22 @@ impl<P: Send + Sync> Agent<P> {
         context_params: Arc<dyn ContextParamResolver>,
         config: AgentConfig,
     ) -> Self {
+        // Startup diagnostic: the registry as the agent sees it, so a
+        // missing action or wrong block is visible at assembly, not at the
+        // first proposal.
+        for def in registry.action_defs() {
+            tracing::info!(
+                action = def.id.as_str(),
+                block = def.block_type.as_str(),
+                mutates = def.mutates,
+                "action registered"
+            );
+        }
+        tracing::info!(
+            actions = registry.action_defs().count(),
+            blocks = registry.block_defs().count(),
+            "agent assembled"
+        );
         Self {
             registry,
             llm,
@@ -234,7 +256,7 @@ impl<P: Send + Sync> Agent<P> {
         spec_version: &str,
         context: Context,
     ) -> Vec<ServerEvent> {
-        if !spec_version.starts_with(crate::SPEC_VERSION) {
+        if !crate::spec_version_compatible(spec_version) {
             return vec![ServerEvent::Error {
                 code: "unsupported_spec_version".to_owned(),
                 message: format!(
@@ -445,13 +467,26 @@ impl<P: Send + Sync> Agent<P> {
         {
             Ok(validated) => validated,
             Err(failure) => {
+                // Guidance matched to the failure: a context-resolution miss
+                // is about *this moment's* app state, and generic "fix your
+                // arguments" advice teaches the model the wrong lesson — it
+                // starts refusing the action even after the user navigates.
+                let guidance = if matches!(failure, ValidationFailure::UnresolvedContextParam(_)) {
+                    "This reflects the app context at this moment, not a \
+                     permanent limitation: the same tool call can succeed once \
+                     the user navigates to a matching record. Tell the user \
+                     what to open or select; if they ask again later, call the \
+                     tool again rather than assuming it will fail."
+                } else if failure.is_model_fixable() {
+                    "Use only the provided tools with arguments matching their \
+                     schema, or reply in text if the request cannot be served."
+                } else {
+                    "This cannot be fixed by changing the tool call; briefly \
+                     tell the user why the action is unavailable."
+                };
                 session.history.push(ChatTurn {
                     role: ChatRole::Tool,
-                    content: format!(
-                        "proposal rejected by validation: {failure}. Use only the \
-                         provided tools with arguments matching their schema, or \
-                         reply in text if the request cannot be served."
-                    ),
+                    content: format!("proposal rejected by validation: {failure}. {guidance}"),
                 });
                 return Err(failure);
             }

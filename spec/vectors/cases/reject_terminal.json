@@ -1,0 +1,30 @@
+{
+  "name": "reject_terminal",
+  "description": "Reject is terminal: a later confirm of the same proposal reports the actual state and executes nothing.",
+  "spec": ["6.2", "7.3", "12.3"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal", "proposal_id": { "$bind": "P" } }
+    ] },
+    { "send": { "type": "reject_action", "proposal_id": { "$ref": "P" }, "reason": "changed my mind" } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" }, "state": "rejected" }
+    ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" }, "state": "rejected" }
+    ] }
+  ],
+  "executions": []
+}

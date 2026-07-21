@@ -1,0 +1,18 @@
+{
+  "name": "init_first_required",
+  "description": "The first frame on a stream must be init: anything else is answered with an unrecoverable init_required error and the session closes.",
+  "spec": ["6.1"],
+  "layer": "binding",
+  "fixture": "co-buyer",
+  "llm": [],
+  "authz": { "default": "allow" },
+  "frames": [
+    { "json": { "type": "user_message", "text": "hi", "client_msg_id": "c-1" } },
+    { "json": { "type": "init", "spec_version": "0.1.0-draft", "context": { "route": "/" } } }
+  ],
+  "expect": [
+    { "type": "error", "code": "init_required", "recoverable": false }
+  ],
+  "expect_close": true,
+  "executions": []
+}

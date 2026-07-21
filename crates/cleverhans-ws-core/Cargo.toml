@@ -1,0 +1,22 @@
+[package]
+name = "cleverhans-ws-core"
+description = "Framework-neutral JSON-frame session loop for the CleverHans envelope"
+version.workspace = true
+readme = "README.md"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cleverhans-core = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = "0.1"
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

@@ -81,12 +81,15 @@ impl ValueType {
 
 /// One parameter of an action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParamSpec {
     /// Parameter name.
     pub name: String,
     /// Model-facing description (utterance params only).
+    #[serde(default)]
     pub description: String,
     /// Value type.
+    #[serde(rename = "type")]
     pub ty: ValueType,
     /// Where the value comes from.
     pub source: ParamSource,
@@ -96,10 +99,12 @@ pub struct ParamSpec {
 
 /// One slot of a block type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SlotSpec {
     /// Slot name.
     pub name: String,
     /// Value type.
+    #[serde(rename = "type")]
     pub ty: ValueType,
     /// Whether the slot must be filled.
     pub required: bool,
@@ -107,6 +112,7 @@ pub struct SlotSpec {
 
 /// A registered UI block type with its slot schema (spec §8).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BlockDef {
     /// The closed-enum identifier the frontend routes on.
     pub block_type: String,
@@ -156,6 +162,7 @@ impl BlockDef {
 
 /// The wire-visible metadata of one action (spec §4).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ActionDef {
     /// Inert, hand-authored, opaque key (spec §3).
     pub id: String,
@@ -180,7 +187,9 @@ pub struct ActionRegistration<P> {
     pub handler: Arc<dyn ActionHandler<P>>,
     /// Preview computation; present iff `def.mutates` (enforced at build).
     pub dry_run: Option<Arc<dyn DryRunHandler<P>>>,
-    /// Slot content builder; `None` renders empty slots.
+    /// Slot content builder; `None` renders empty slots. Fixed cards use
+    /// [`static_slots`](crate::seams::static_slots); param-aware cards pass
+    /// a closure (see [`SlotBuilder`]).
     pub slot_builder: Option<Arc<dyn SlotBuilder>>,
 }
 
@@ -189,6 +198,7 @@ pub struct ActionRegistration<P> {
 pub struct Registry<P> {
     actions: BTreeMap<String, ActionRegistration<P>>,
     blocks: BTreeMap<String, BlockDef>,
+    context_params: BTreeMap<String, String>,
 }
 
 impl<P> Registry<P> {
@@ -198,6 +208,9 @@ impl<P> Registry<P> {
         RegistryBuilder {
             actions: Vec::new(),
             blocks: Vec::new(),
+            pending: Vec::new(),
+            attachments: Vec::new(),
+            context_params: BTreeMap::new(),
         }
     }
 
@@ -223,6 +236,19 @@ impl<P> Registry<P> {
     /// All registered block definitions, in deterministic order.
     pub fn block_defs(&self) -> impl Iterator<Item = &BlockDef> {
         self.blocks.values()
+    }
+
+    /// The wire-visible registry as a versioned document — ID-sorted,
+    /// `spec_version` = [`crate::SPEC_VERSION`]. The inverse of
+    /// [`RegistryBuilder::from_schema`] modulo handlers.
+    #[must_use]
+    pub fn schema(&self) -> crate::schema::RegistrySchema {
+        crate::schema::RegistrySchema {
+            spec_version: crate::SPEC_VERSION.to_owned(),
+            blocks: self.blocks.values().cloned().collect(),
+            actions: self.actions.values().map(|reg| reg.def.clone()).collect(),
+            context_params: self.context_params.clone(),
+        }
     }
 
     /// The registry as model-facing tool definitions. Only utterance-sourced
@@ -269,9 +295,165 @@ impl<P> Registry<P> {
 pub struct RegistryBuilder<P> {
     actions: Vec<ActionRegistration<P>>,
     blocks: Vec<BlockDef>,
+    pending: Vec<ActionDef>,
+    attachments: Vec<Attachment<P>>,
+    context_params: BTreeMap<String, String>,
+}
+
+struct Attachment<P> {
+    id: String,
+    /// `None` only for a [`RegistryBuilder::bind`] that never set a handler
+    /// — reported as [`RegistryError::MissingHandler`] at build.
+    handler: Option<Arc<dyn ActionHandler<P>>>,
+    dry_run: Option<Arc<dyn DryRunHandler<P>>>,
+    slot_builder: Option<Arc<dyn SlotBuilder>>,
+}
+
+/// Accumulates one action's handlers for [`RegistryBuilder::bind`].
+pub struct ActionBinding<P> {
+    handler: Option<Arc<dyn ActionHandler<P>>>,
+    dry_run: Option<Arc<dyn DryRunHandler<P>>>,
+    slot_builder: Option<Arc<dyn SlotBuilder>>,
+}
+
+impl<P> ActionBinding<P> {
+    /// The app's execution path — required.
+    #[must_use]
+    pub fn handler(mut self, handler: impl ActionHandler<P> + 'static) -> Self {
+        self.handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// The side-effect-free preview — required iff the action mutates.
+    #[must_use]
+    pub fn dry_run(mut self, dry_run: impl DryRunHandler<P> + 'static) -> Self {
+        self.dry_run = Some(Arc::new(dry_run));
+        self
+    }
+
+    /// Slot content from params/preview; omit to render empty slots.
+    #[must_use]
+    pub fn slots(mut self, slot_builder: impl SlotBuilder + 'static) -> Self {
+        self.slot_builder = Some(Arc::new(slot_builder));
+        self
+    }
+
+    /// Fixed slot content — [`ActionBinding::slots`] over
+    /// [`static_slots`](crate::seams::static_slots).
+    #[must_use]
+    pub fn static_slots(self, slots: JsonMap) -> Self {
+        self.slots(crate::seams::static_slots(slots))
+    }
 }
 
 impl<P> RegistryBuilder<P> {
+    /// Seeds a builder from a declarative document (spec §4): blocks are
+    /// registered, action defs stay pending until [`RegistryBuilder::attach`]
+    /// binds their handlers. Mixing with programmatic
+    /// [`RegistryBuilder::block`]/[`RegistryBuilder::action`] calls is fine.
+    #[must_use]
+    pub fn from_schema(schema: crate::schema::RegistrySchema) -> Self {
+        let mut builder = Registry::builder();
+        builder.blocks = schema.blocks;
+        builder.pending = schema.actions;
+        builder.context_params = schema.context_params;
+        builder
+    }
+
+    /// Binds handlers to a pending schema def by action ID. Infallible here;
+    /// unknown, duplicate, or never-attached IDs are reported at
+    /// [`RegistryBuilder::build`]. [`RegistryBuilder::bind`] is the named,
+    /// unwrapped form of the same registration.
+    #[must_use]
+    pub fn attach(
+        mut self,
+        id: impl Into<String>,
+        handler: Arc<dyn ActionHandler<P>>,
+        dry_run: Option<Arc<dyn DryRunHandler<P>>>,
+        slot_builder: Option<Arc<dyn SlotBuilder>>,
+    ) -> Self {
+        self.attachments.push(Attachment {
+            id: id.into(),
+            handler: Some(handler),
+            dry_run,
+            slot_builder,
+        });
+        self
+    }
+
+    /// [`RegistryBuilder::attach`] with named setters instead of positional
+    /// `Option<Arc<...>>` slots. Each setter takes any impl — closure,
+    /// struct, or an already-`Arc`'d handler (e.g. from
+    /// [`typed_handler`](crate::seams::typed_handler)) — so registrations
+    /// carry no `Some(Arc::new(...))` wrapping. A binding without
+    /// [`ActionBinding::handler`] fails [`RegistryBuilder::build`] with
+    /// [`RegistryError::MissingHandler`].
+    ///
+    /// ```
+    /// use cleverhans_core::envelope::DryRunPreview;
+    /// use cleverhans_core::error::HandlerError;
+    /// use cleverhans_core::registry::Registry;
+    /// use cleverhans_core::schema::RegistrySchema;
+    /// use cleverhans_core::{JsonMap, slots};
+    /// # let schema = RegistrySchema {
+    /// #     spec_version: cleverhans_core::SPEC_VERSION.to_owned(),
+    /// #     blocks: vec![cleverhans_core::registry::BlockDef {
+    /// #         block_type: "confirm".to_owned(), slots: vec![] }],
+    /// #     actions: vec![cleverhans_core::registry::ActionDef {
+    /// #         id: "doc.publish".to_owned(), description: "publish".to_owned(),
+    /// #         params: vec![], block_type: "confirm".to_owned(),
+    /// #         mutates: true, authz_key: "doc.publish".to_owned() }],
+    /// #     context_params: Default::default(),
+    /// # };
+    ///
+    /// #[derive(Clone)]
+    /// struct User;
+    ///
+    /// let registry = cleverhans_core::registry::RegistryBuilder::<User>::from_schema(schema)
+    ///     .bind("doc.publish", |action| {
+    ///         action
+    ///             .handler(|params: JsonMap, _: User| async move {
+    ///                 Ok(serde_json::Value::Object(params))
+    ///             })
+    ///             .dry_run(|_: JsonMap, _: User| async move {
+    ///                 Ok(DryRunPreview::default())
+    ///             })
+    ///             .static_slots(slots! {})
+    ///     })
+    ///     .build()
+    ///     .expect("valid registry");
+    /// ```
+    #[must_use]
+    pub fn bind(
+        mut self,
+        id: impl Into<String>,
+        configure: impl FnOnce(ActionBinding<P>) -> ActionBinding<P>,
+    ) -> Self {
+        let binding = configure(ActionBinding {
+            handler: None,
+            dry_run: None,
+            slot_builder: None,
+        });
+        self.attachments.push(Attachment {
+            id: id.into(),
+            handler: binding.handler,
+            dry_run: binding.dry_run,
+            slot_builder: binding.slot_builder,
+        });
+        self
+    }
+
+    /// Declares a context-param mapping (param name → context path) for the
+    /// exported document ([`Registry::schema`]) and for
+    /// [`crate::schema::MappedContextResolver`]. Programmatically-built
+    /// registries use this so their exported schema carries the same mapping
+    /// a declarative author would write.
+    #[must_use]
+    pub fn context_param(mut self, param: impl Into<String>, path: impl Into<String>) -> Self {
+        self.context_params.insert(param.into(), path.into());
+        self
+    }
+
     /// Registers a block type.
     #[must_use]
     pub fn block(mut self, def: BlockDef) -> Self {
@@ -302,8 +484,34 @@ impl<P> RegistryBuilder<P> {
     /// # Errors
     ///
     /// [`RegistryError`] on duplicate IDs, references to unregistered block
-    /// types, or mutating actions without a dry-run handler.
-    pub fn build(self) -> Result<Registry<P>, RegistryError> {
+    /// types, mutating actions without a dry-run handler, or schema defs
+    /// left without handlers ([`RegistryBuilder::attach`]).
+    pub fn build(mut self) -> Result<Registry<P>, RegistryError> {
+        // Resolve attachments against pending schema defs first, so the
+        // invariant checks below (incl. mutates ⇒ dry_run) cover both the
+        // programmatic and the declarative path.
+        for attachment in self.attachments {
+            let Some(at) = self.pending.iter().position(|def| def.id == attachment.id) else {
+                let attached_before = self.actions.iter().any(|reg| reg.def.id == attachment.id);
+                return Err(if attached_before {
+                    RegistryError::DuplicateAttachment(attachment.id)
+                } else {
+                    RegistryError::UnknownAttachment(attachment.id)
+                });
+            };
+            let Some(handler) = attachment.handler else {
+                return Err(RegistryError::MissingHandler(attachment.id));
+            };
+            self.actions.push(ActionRegistration {
+                def: self.pending.remove(at),
+                handler,
+                dry_run: attachment.dry_run,
+                slot_builder: attachment.slot_builder,
+            });
+        }
+        if let Some(def) = self.pending.first() {
+            return Err(RegistryError::UnattachedAction(def.id.clone()));
+        }
         let mut blocks = BTreeMap::new();
         for def in self.blocks {
             let block_type = def.block_type.clone();
@@ -323,11 +531,18 @@ impl<P> RegistryBuilder<P> {
             if reg.def.mutates && reg.dry_run.is_none() {
                 return Err(RegistryError::MissingDryRun(id));
             }
+            if !reg.def.mutates && reg.dry_run.is_some() {
+                return Err(RegistryError::UnexpectedDryRun(id));
+            }
             if actions.insert(id.clone(), reg).is_some() {
                 return Err(RegistryError::DuplicateAction(id));
             }
         }
-        Ok(Registry { actions, blocks })
+        Ok(Registry {
+            actions,
+            blocks,
+            context_params: self.context_params,
+        })
     }
 }
 
@@ -421,6 +636,144 @@ mod tests {
                 .build();
 
             assert!(matches!(result, Err(RegistryError::MissingDryRun(id)) if id == "a.b"));
+        }
+    }
+
+    mod schema_path {
+        use super::*;
+        use crate::schema::RegistrySchema;
+
+        pub(super) fn schema() -> RegistrySchema {
+            RegistrySchema {
+                spec_version: crate::SPEC_VERSION.to_owned(),
+                blocks: vec![confirm_block()],
+                actions: vec![action("a.b", true)],
+                context_params: std::collections::BTreeMap::from([(
+                    "recordId".to_owned(),
+                    "selected_record_id".to_owned(),
+                )]),
+            }
+        }
+
+        pub(super) struct NoopDryRun;
+
+        #[async_trait]
+        impl DryRunHandler<()> for NoopDryRun {
+            async fn dry_run(
+                &self,
+                _params: &JsonMap,
+                _principal: &(),
+            ) -> Result<crate::envelope::DryRunPreview, HandlerError> {
+                Ok(crate::envelope::DryRunPreview::default())
+            }
+        }
+
+        #[test]
+        fn attached_schema_builds_and_round_trips() {
+            let registry = RegistryBuilder::from_schema(schema())
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
+                .build()
+                .expect("valid registry");
+
+            assert_eq!(registry.schema(), schema());
+        }
+
+        #[test]
+        fn unattached_def_fails_build() {
+            let result = RegistryBuilder::<()>::from_schema(schema()).build();
+
+            assert!(matches!(result, Err(RegistryError::UnattachedAction(id)) if id == "a.b"));
+        }
+
+        #[test]
+        fn attach_for_undeclared_action_fails_build() {
+            let result = RegistryBuilder::from_schema(schema())
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
+                .attach("no.such", Arc::new(NoopHandler), None, None)
+                .build();
+
+            assert!(matches!(result, Err(RegistryError::UnknownAttachment(id)) if id == "no.such"));
+        }
+
+        #[test]
+        fn double_attach_fails_build() {
+            let result = RegistryBuilder::from_schema(schema())
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
+                .attach(
+                    "a.b",
+                    Arc::new(NoopHandler),
+                    Some(Arc::new(NoopDryRun)),
+                    None,
+                )
+                .build();
+
+            assert!(matches!(result, Err(RegistryError::DuplicateAttachment(id)) if id == "a.b"));
+        }
+
+        #[test]
+        fn mutates_invariant_covers_schema_path() {
+            let result = RegistryBuilder::from_schema(schema())
+                .attach("a.b", Arc::new(NoopHandler), None, None)
+                .build();
+
+            assert!(matches!(result, Err(RegistryError::MissingDryRun(id)) if id == "a.b"));
+        }
+    }
+
+    mod bind {
+        use super::*;
+
+        #[test]
+        fn binds_impls_without_wrapping() {
+            let registry = RegistryBuilder::from_schema(schema_path::schema())
+                .bind("a.b", |action| {
+                    action
+                        .handler(NoopHandler)
+                        .dry_run(schema_path::NoopDryRun)
+                        .static_slots(crate::slots! { "title": "ok" })
+                })
+                .build()
+                .expect("valid registry");
+
+            assert!(registry.action("a.b").is_some());
+        }
+
+        #[test]
+        fn arc_handlers_pass_through() {
+            let handler: Arc<dyn ActionHandler<()>> = Arc::new(NoopHandler);
+            let dry_run: Arc<dyn DryRunHandler<()>> = Arc::new(schema_path::NoopDryRun);
+
+            let result = RegistryBuilder::from_schema(schema_path::schema())
+                .bind("a.b", |action| action.handler(handler).dry_run(dry_run))
+                .build();
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn binding_without_handler_fails_build() {
+            let result = RegistryBuilder::<()>::from_schema(schema_path::schema())
+                .bind("a.b", |action| {
+                    action.static_slots(crate::slots! { "title": "no handler" })
+                })
+                .build();
+
+            assert!(matches!(result, Err(RegistryError::MissingHandler(id)) if id == "a.b"));
         }
     }
 

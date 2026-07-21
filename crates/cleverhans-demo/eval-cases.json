@@ -42,6 +42,13 @@
                   "params": { "status": "archived" } }
   },
   {
+    "name": "rename naming the selected doc by title still proposes",
+    "utterance": "rename Retro Notes to New Notes",
+    "context": { "route": "/documents/doc-3", "selected_record_id": "doc-3", "view_type": "detail" },
+    "expected": { "kind": "action", "action_id": "document.rename",
+                  "params": { "title": "New Notes", "documentId": "doc-3" } }
+  },
+  {
     "name": "out-of-scope request declines",
     "utterance": "what's the weather in Oslo?",
     "context": { "route": "/documents/doc-1", "selected_record_id": "doc-1" },

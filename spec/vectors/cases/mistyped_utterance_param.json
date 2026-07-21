@@ -1,0 +1,25 @@
+{
+  "name": "mistyped_utterance_param",
+  "description": "An utterance param that fails its schema typecheck invalidates the candidate; the scripted retry turn answers in text.",
+  "spec": ["7.1"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.setCountry",
+                        "arguments": { "country": 42 } } } ],
+    [ { "text": "Which country should the transaction use?" } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "set the country", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "chat_message", "done": true,
+        "text": "Which country should the transaction use?" }
+    ] }
+  ],
+  "executions": []
+}

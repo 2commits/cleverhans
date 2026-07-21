@@ -2,21 +2,23 @@
 name = "cleverhans-ws"
 description = "WebSocket + JSON transport binding for the CleverHans envelope (axum)"
 version.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
-cleverhans-core = { path = "../cleverhans-core" }
+cleverhans-core = { workspace = true }
+cleverhans-ws-core = { workspace = true }
 futures-util = { version = "0.3", default-features = false }
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
-tracing = "0.1"
 
 [dev-dependencies]
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+cleverhans-core = { workspace = true, features = ["test-util"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
 
 [lints]
 workspace = true

@@ -1,21 +1,24 @@
 //! The demo's Eddytor-flavored document registry: an in-memory document
 //! store with rename/publish/archive/bulk-delete actions. This is the
-//! dogfood surface — every seam an app implements is implemented here.
+//! dogfood surface — every seam an app implements is implemented here, and
+//! every handler style is on display:
+//!
+//! - typed closure over codegen params ([`typed_handler`]) — rename
+//! - plain closure over the raw [`JsonMap`] — publish/archive
+//! - trait impls on a struct (stateful, or one impl serving both the
+//!   handler and dry-run seams) — bulk delete, single-doc preview
+//!
+//! Action IDs come from [`crate::generated`], so a typo'd attachment is a
+//! compile error, not a runtime `UnknownAttachment`.
 
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
 
-use cleverhans_core::JsonMap;
-use cleverhans_core::envelope::{Context, DryRunPreview};
-use cleverhans_core::error::HandlerError;
-use cleverhans_core::registry::{
-    ActionDef, BlockDef, ParamSource, ParamSpec, Registry, SlotSpec, ValueType,
-};
-use cleverhans_core::seams::{
-    ActionHandler, AuthzDecision, AuthzResolver, ContextParamResolver, DryRunHandler, SlotBuilder,
-};
+use cleverhans::prelude::*;
+
+use crate::generated::{DocumentRenameParams, action_ids};
 
 /// The demo principal. Everyone may do everything — this is a dogfood
 /// server, not an auth reference.
@@ -91,48 +94,44 @@ fn param_str<'a>(params: &'a JsonMap, key: &str) -> Result<&'a str, HandlerError
         .ok_or_else(|| HandlerError::Internal(format!("missing param `{key}`")))
 }
 
-struct Rename(Store);
-
-#[async_trait]
-impl ActionHandler<DemoUser> for Rename {
-    async fn execute(
-        &self,
-        params: &JsonMap,
-        _principal: &DemoUser,
-    ) -> Result<serde_json::Value, HandlerError> {
-        let id = param_str(params, "documentId")?.to_owned();
-        let title = param_str(params, "title")?.to_owned();
-        self.0.with(|docs| {
-            let doc = docs
-                .iter_mut()
-                .find(|d| d.id == id)
-                .ok_or_else(|| HandlerError::Rejected(format!("no document `{id}`")))?;
-            doc.title = title.clone();
-            Ok(json!({"id": doc.id, "title": doc.title}))
-        })
-    }
+/// Rename, as a typed closure: the validated params arrive as the codegen
+/// struct, so the body never digs JSON by string key.
+fn rename_handler(store: &Store) -> Arc<dyn ActionHandler<DemoUser>> {
+    let store = store.clone();
+    typed_handler(move |params: DocumentRenameParams, _: DemoUser| {
+        let store = store.clone();
+        async move {
+            store.with(|docs| {
+                let doc = docs
+                    .iter_mut()
+                    .find(|d| d.id == params.document_id)
+                    .ok_or_else(|| {
+                        HandlerError::Rejected(format!("no document `{}`", params.document_id))
+                    })?;
+                doc.title = params.title.clone();
+                Ok(json!({"id": doc.id, "title": doc.title}))
+            })
+        }
+    })
 }
 
-struct SetStatus(Store, DocStatus);
-
-#[async_trait]
-impl ActionHandler<DemoUser> for SetStatus {
-    async fn execute(
-        &self,
-        params: &JsonMap,
-        _principal: &DemoUser,
-    ) -> Result<serde_json::Value, HandlerError> {
-        let id = param_str(params, "documentId")?.to_owned();
-        let status = self.1;
-        self.0.with(|docs| {
-            let doc = docs
-                .iter_mut()
-                .find(|d| d.id == id)
-                .ok_or_else(|| HandlerError::Rejected(format!("no document `{id}`")))?;
-            doc.status = status;
-            Ok(json!({"id": doc.id, "status": format!("{status:?}")}))
-        })
-    }
+/// Publish/archive, as a plain closure over the raw params map.
+fn set_status_handler(store: &Store, status: DocStatus) -> Arc<dyn ActionHandler<DemoUser>> {
+    let store = store.clone();
+    Arc::new(move |params: JsonMap, _: DemoUser| {
+        let store = store.clone();
+        async move {
+            let id = param_str(&params, "documentId")?.to_owned();
+            store.with(|docs| {
+                let doc = docs
+                    .iter_mut()
+                    .find(|d| d.id == id)
+                    .ok_or_else(|| HandlerError::Rejected(format!("no document `{id}`")))?;
+                doc.status = status;
+                Ok(json!({"id": doc.id, "status": format!("{status:?}")}))
+            })
+        }
+    })
 }
 
 /// Preview for single-document actions: exactly the selected document.
@@ -160,7 +159,8 @@ impl DryRunHandler<DemoUser> for OneDocPreview {
 }
 
 /// The bulk predicate action (spec §4.2): the model names a status, the app
-/// resolves which documents match.
+/// resolves which documents match. One struct serves both seams so the
+/// dry-run and the execution share the predicate.
 struct DeleteByStatus(Store);
 
 impl DeleteByStatus {
@@ -201,9 +201,10 @@ impl DryRunHandler<DemoUser> for DeleteByStatus {
         Ok(DryRunPreview {
             affected_count: matching.len() as u64,
             sample_ids: matching.iter().take(5).map(|d| d.id.clone()).collect(),
+            // `BulkPreviewBlock` already prints the affected count, so the
+            // summary carries only the predicate.
             summary: Some(format!(
-                "Delete {} {} document(s)",
-                matching.len(),
+                "every {} document",
                 param_str(params, "status").unwrap_or("?")
             )),
             extensions: JsonMap::new(),
@@ -211,166 +212,59 @@ impl DryRunHandler<DemoUser> for DeleteByStatus {
     }
 }
 
-/// Title/detail slots from the dry-run preview.
-struct PreviewSlots(&'static str);
-
-impl SlotBuilder for PreviewSlots {
-    fn build(&self, _params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
-        let mut slots = JsonMap::new();
-        slots.insert("title".to_owned(), json!(self.0));
-        if let Some(summary) = preview.and_then(|p| p.summary.as_deref()) {
-            slots.insert("detail".to_owned(), json!(summary));
-        }
-        slots
-    }
-}
-
-pub struct AllowAll;
-
-#[async_trait]
-impl AuthzResolver<DemoUser> for AllowAll {
-    async fn authorize(
-        &self,
-        _principal: &DemoUser,
-        _action_id: &str,
-        _params: &JsonMap,
-    ) -> AuthzDecision {
-        AuthzDecision::Allow
-    }
+/// The demo's declarative registry document (spec §4). One source, four
+/// consumers: this builder, the codegen CLI, the conformance fixtures, and
+/// [`crate::generated`].
+pub fn demo_schema() -> RegistrySchema {
+    RegistrySchema::from_json(include_str!("../registry.json"))
+        .expect("demo registry.json is valid")
 }
 
 /// `documentId` comes from the selected record in context — the model never
-/// names a document.
-pub struct SelectionResolver;
-
-impl ContextParamResolver for SelectionResolver {
-    fn resolve(
-        &self,
-        _action_id: &str,
-        param: &ParamSpec,
-        context: &Context,
-    ) -> Option<serde_json::Value> {
-        (param.name == "documentId")
-            .then(|| context.selected_record_id.clone().map(Into::into))
-            .flatten()
-    }
+/// names a document. The mapping lives in `registry.json`.
+pub fn context_resolver() -> MappedContextResolver {
+    demo_schema()
+        .context_resolver()
+        .expect("demo registry.json maps every context param")
 }
 
-fn document_id_param() -> ParamSpec {
-    ParamSpec {
-        name: "documentId".to_owned(),
-        description: String::new(),
-        ty: ValueType::String,
-        source: ParamSource::Context,
-        required: true,
-    }
-}
-
-fn single_doc_action(id: &str, description: &str) -> ActionDef {
-    ActionDef {
-        id: id.to_owned(),
-        description: description.to_owned(),
-        params: vec![document_id_param()],
-        block_type: "confirm".to_owned(),
-        mutates: true,
-        authz_key: id.to_owned(),
-    }
-}
-
-/// Builds the demo registry over a shared store.
+/// Builds the demo registry over a shared store: declarative defs from
+/// `registry.json`, handlers attached here by generated action ID.
 pub fn build_registry(store: &Store) -> Registry<DemoUser> {
-    Registry::builder()
-        .block(BlockDef {
-            block_type: "confirm".to_owned(),
-            slots: vec![
-                SlotSpec {
-                    name: "title".to_owned(),
-                    ty: ValueType::String,
-                    required: true,
-                },
-                SlotSpec {
-                    name: "detail".to_owned(),
-                    ty: ValueType::String,
-                    required: false,
-                },
-            ],
+    RegistryBuilder::from_schema(demo_schema())
+        .bind(action_ids::DOCUMENT_RENAME, |action| {
+            action
+                .handler(rename_handler(store))
+                .dry_run(OneDocPreview(store.clone()))
+                // The dry-run summary names the current title; `detail`
+                // carries the utterance-sourced new title so the card shows
+                // both.
+                .slots(|params: &JsonMap, _: Option<&DryRunPreview>| {
+                    let new_title = params.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                    slots! {
+                        "title": "Rename document",
+                        "detail": format!("New title: \u{201c}{new_title}\u{201d}"),
+                    }
+                })
         })
-        .block(BlockDef {
-            block_type: "bulk_preview".to_owned(),
-            slots: vec![SlotSpec {
-                name: "title".to_owned(),
-                ty: ValueType::String,
-                required: true,
-            }],
+        .bind(action_ids::DOCUMENT_PUBLISH, |action| {
+            action
+                .handler(set_status_handler(store, DocStatus::Published))
+                .dry_run(OneDocPreview(store.clone()))
+                .static_slots(slots! { "title": "Publish document" })
         })
-        .action(
-            ActionDef {
-                id: "document.rename".to_owned(),
-                description: "Rename the currently open document to a new title the user \
-                              provides."
-                    .to_owned(),
-                params: vec![
-                    document_id_param(),
-                    ParamSpec {
-                        name: "title".to_owned(),
-                        description: "The new title, exactly as the user wants it".to_owned(),
-                        ty: ValueType::String,
-                        source: ParamSource::Utterance,
-                        required: true,
-                    },
-                ],
-                block_type: "confirm".to_owned(),
-                mutates: true,
-                authz_key: "document.rename".to_owned(),
-            },
-            Arc::new(Rename(store.clone())),
-            Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(Arc::new(PreviewSlots("Rename document"))),
-        )
-        .action(
-            single_doc_action(
-                "document.publish",
-                "Publish the currently open document so it becomes visible to readers.",
-            ),
-            Arc::new(SetStatus(store.clone(), DocStatus::Published)),
-            Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(Arc::new(PreviewSlots("Publish document"))),
-        )
-        .action(
-            single_doc_action(
-                "document.archive",
-                "Archive the currently open document, hiding it from active lists.",
-            ),
-            Arc::new(SetStatus(store.clone(), DocStatus::Archived)),
-            Some(Arc::new(OneDocPreview(store.clone()))),
-            Some(Arc::new(PreviewSlots("Archive document"))),
-        )
-        .action(
-            ActionDef {
-                id: "documents.deleteByStatus".to_owned(),
-                description: "Delete every document with a given status (draft, published \
-                              or archived). Use for bulk cleanup requests like \u{201c}delete \
-                              all drafts\u{201d}."
-                    .to_owned(),
-                params: vec![ParamSpec {
-                    name: "status".to_owned(),
-                    description: "Which documents to delete".to_owned(),
-                    ty: ValueType::StringEnum(vec![
-                        "draft".to_owned(),
-                        "published".to_owned(),
-                        "archived".to_owned(),
-                    ]),
-                    source: ParamSource::Utterance,
-                    required: true,
-                }],
-                block_type: "bulk_preview".to_owned(),
-                mutates: true,
-                authz_key: "documents.delete".to_owned(),
-            },
-            Arc::new(DeleteByStatus(store.clone())),
-            Some(Arc::new(DeleteByStatus(store.clone()))),
-            Some(Arc::new(PreviewSlots("Bulk delete documents"))),
-        )
+        .bind(action_ids::DOCUMENT_ARCHIVE, |action| {
+            action
+                .handler(set_status_handler(store, DocStatus::Archived))
+                .dry_run(OneDocPreview(store.clone()))
+                .static_slots(slots! { "title": "Archive document" })
+        })
+        .bind(action_ids::DOCUMENTS_DELETE_BY_STATUS, |action| {
+            action
+                .handler(DeleteByStatus(store.clone()))
+                .dry_run(DeleteByStatus(store.clone()))
+                .static_slots(slots! { "title": "Bulk delete documents" })
+        })
         .build()
         .expect("demo registry is valid")
 }

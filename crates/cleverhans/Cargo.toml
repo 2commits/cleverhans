@@ -1,0 +1,45 @@
+[package]
+name = "cleverhans"
+description = "Batteries-included facade for the CleverHans propose-only HITL agent framework"
+version.workspace = true
+readme = "README.md"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# WebSocket + JSON transport binding (axum).
+ws = ["dep:cleverhans-ws"]
+# Anthropic Messages API provider.
+anthropic = ["dep:cleverhans-llm-anthropic"]
+# Local Ollama provider (zero egress).
+ollama = ["dep:cleverhans-llm-ollama"]
+# Action-mapping eval harness.
+evals = ["dep:cleverhans-evals"]
+# Deterministic doubles for offline integration tests.
+test-util = ["cleverhans-core/test-util"]
+
+[dependencies]
+cleverhans-core = { workspace = true }
+cleverhans-evals = { workspace = true, optional = true }
+cleverhans-llm-anthropic = { workspace = true, optional = true }
+cleverhans-llm-ollama = { workspace = true, optional = true }
+cleverhans-ws = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
+
+[[example]]
+name = "mount_axum"
+required-features = ["ws", "test-util"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

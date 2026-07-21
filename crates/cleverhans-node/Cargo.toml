@@ -1,0 +1,27 @@
+[package]
+name = "cleverhans-node"
+description = "napi-rs binding: host a CleverHans agent from Node.js"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+async-trait = { workspace = true }
+cleverhans-core = { workspace = true }
+cleverhans-ffi = { workspace = true }
+napi = { version = "3", default-features = false, features = ["napi8", "async", "serde-json"] }
+napi-derive = "3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[lints]
+workspace = true

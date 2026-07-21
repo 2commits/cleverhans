@@ -1,0 +1,76 @@
+{
+  "spec_version": "0.1",
+  "blocks": [
+    {
+      "block_type": "bulk_preview",
+      "slots": [
+        { "name": "title", "type": "string", "required": true }
+      ]
+    },
+    {
+      "block_type": "confirm",
+      "slots": [
+        { "name": "title", "type": "string", "required": true },
+        { "name": "detail", "type": "string", "required": false }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "document.archive",
+      "description": "Archive the currently open document, hiding it from active lists.",
+      "params": [
+        { "name": "documentId", "type": "string", "source": "context", "required": true }
+      ],
+      "block_type": "confirm",
+      "mutates": true,
+      "authz_key": "document.archive"
+    },
+    {
+      "id": "document.publish",
+      "description": "Publish the currently open document so it becomes visible to readers.",
+      "params": [
+        { "name": "documentId", "type": "string", "source": "context", "required": true }
+      ],
+      "block_type": "confirm",
+      "mutates": true,
+      "authz_key": "document.publish"
+    },
+    {
+      "id": "document.rename",
+      "description": "Rename the currently open document to a new title the user provides.",
+      "params": [
+        { "name": "documentId", "type": "string", "source": "context", "required": true },
+        {
+          "name": "title",
+          "description": "The new title, exactly as the user wants it",
+          "type": "string",
+          "source": "utterance",
+          "required": true
+        }
+      ],
+      "block_type": "confirm",
+      "mutates": true,
+      "authz_key": "document.rename"
+    },
+    {
+      "id": "documents.deleteByStatus",
+      "description": "Delete every document with a given status (draft, published or archived). Use for bulk cleanup requests like “delete all drafts”.",
+      "params": [
+        {
+          "name": "status",
+          "description": "Which documents to delete",
+          "type": { "string_enum": ["draft", "published", "archived"] },
+          "source": "utterance",
+          "required": true
+        }
+      ],
+      "block_type": "bulk_preview",
+      "mutates": true,
+      "authz_key": "documents.delete"
+    }
+  ],
+  "context_params": {
+    "documentId": "selected_record_id"
+  }
+}

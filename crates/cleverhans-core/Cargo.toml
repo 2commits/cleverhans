@@ -2,9 +2,14 @@
 name = "cleverhans-core"
 description = "Reference backend for the CleverHans propose-only HITL agent protocol"
 version.workspace = true
+readme = "README.md"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[features]
+# Deterministic doubles (`test_util`) for testing integrations offline.
+test-util = []
 
 [dependencies]
 async-trait = { workspace = true }
@@ -14,8 +19,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
+cleverhans-core = { path = ".", features = ["test-util"] }
 futures-util = { workspace = true }
 tokio = { workspace = true }
 

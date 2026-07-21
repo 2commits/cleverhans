@@ -1,0 +1,28 @@
+[package]
+name = "cleverhans-ffi"
+description = "Shared FFI layer for CleverHans language bindings: JSON principal, frame pump, provider factory, registry assembly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+cleverhans-codegen = { workspace = true }
+cleverhans-conformance = { workspace = true }
+cleverhans-core = { workspace = true }
+cleverhans-ws-core = { workspace = true }
+cleverhans-llm-anthropic = { workspace = true }
+cleverhans-llm-ollama = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

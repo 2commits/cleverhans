@@ -6,11 +6,15 @@
 //! the app's principal type `P` so the framework never invents its own
 //! identity model.
 
+use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::JsonMap;
 use crate::envelope::{Context, DryRunPreview};
@@ -35,6 +39,39 @@ pub trait ActionHandler<P>: Send + Sync {
     ) -> Result<serde_json::Value, HandlerError>;
 }
 
+/// Async closures are action handlers, so stateless registrations stay
+/// inline — mirroring the [`SlotBuilder`] blanket impl. The closure takes
+/// owned params and principal (`P: Clone`) so its future is self-contained.
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::JsonMap;
+/// use cleverhans_core::seams::ActionHandler;
+///
+/// #[derive(Clone)]
+/// struct User;
+///
+/// let handler: Arc<dyn ActionHandler<User>> =
+///     Arc::new(|params: JsonMap, _user: User| async move {
+///         Ok(serde_json::Value::Object(params))
+///     });
+/// ```
+#[async_trait]
+impl<P, F, Fut> ActionHandler<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(JsonMap, P) -> Fut + Send + Sync,
+    Fut: Future<Output = Result<serde_json::Value, HandlerError>> + Send,
+{
+    async fn execute(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<serde_json::Value, HandlerError> {
+        self(params.clone(), principal.clone()).await
+    }
+}
+
 /// Side-effect-free preview of a mutating action (spec §7.2), computed under
 /// the principal's own data-access rules so it is permission-correct.
 #[async_trait]
@@ -47,6 +84,152 @@ pub trait DryRunHandler<P>: Send + Sync {
     /// or expired (confirm time).
     async fn dry_run(&self, params: &JsonMap, principal: &P)
     -> Result<DryRunPreview, HandlerError>;
+}
+
+/// Async closures are dry-run handlers too; see the [`ActionHandler`]
+/// blanket impl. The two blankets never collide — the future's output type
+/// picks the trait.
+#[async_trait]
+impl<P, F, Fut> DryRunHandler<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(JsonMap, P) -> Fut + Send + Sync,
+    Fut: Future<Output = Result<DryRunPreview, HandlerError>> + Send,
+{
+    async fn dry_run(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<DryRunPreview, HandlerError> {
+        self(params.clone(), principal.clone()).await
+    }
+}
+
+/// An `Arc`'d handler is a handler, so helpers that return
+/// `Arc<dyn ActionHandler<P>>` (e.g. [`typed_handler`]) and bare
+/// closures/structs pass through the same `impl ActionHandler` surface
+/// (see [`RegistryBuilder::bind`](crate::registry::RegistryBuilder::bind)).
+#[async_trait]
+impl<P: Send + Sync> ActionHandler<P> for Arc<dyn ActionHandler<P>> {
+    async fn execute(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<serde_json::Value, HandlerError> {
+        (**self).execute(params, principal).await
+    }
+}
+
+/// See the [`ActionHandler`] impl for `Arc<dyn ActionHandler<P>>`.
+#[async_trait]
+impl<P: Send + Sync> DryRunHandler<P> for Arc<dyn DryRunHandler<P>> {
+    async fn dry_run(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+    ) -> Result<DryRunPreview, HandlerError> {
+        (**self).dry_run(params, principal).await
+    }
+}
+
+fn parse_params<T: DeserializeOwned>(params: &JsonMap) -> Result<T, HandlerError> {
+    serde_json::from_value(serde_json::Value::Object(params.clone())).map_err(|err| {
+        HandlerError::Internal(format!(
+            "validated params did not match the handler's params type \
+             (registry/codegen drift?): {err}"
+        ))
+    })
+}
+
+/// Wraps a closure over a typed params struct (e.g. codegen output) into an
+/// [`ActionHandler`]: the validated [`JsonMap`] is deserialized into `T`
+/// before the closure runs, so handler bodies never dig params out of JSON
+/// by string key.
+///
+/// ```
+/// use cleverhans_core::seams::typed_handler;
+///
+/// #[derive(Clone)]
+/// struct User;
+///
+/// #[derive(serde::Deserialize)]
+/// struct RenameParams {
+///     title: String,
+/// }
+///
+/// let handler = typed_handler(|params: RenameParams, _user: User| async move {
+///     Ok(serde_json::json!({ "title": params.title }))
+/// });
+/// ```
+pub fn typed_handler<P, T, F, Fut>(f: F) -> Arc<dyn ActionHandler<P>>
+where
+    P: Clone + Send + Sync + 'static,
+    T: DeserializeOwned + Send + 'static,
+    F: Fn(T, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<serde_json::Value, HandlerError>> + Send + 'static,
+{
+    struct Typed<F, T> {
+        f: F,
+        _params: PhantomData<fn() -> T>,
+    }
+
+    #[async_trait]
+    impl<P, T, F, Fut> ActionHandler<P> for Typed<F, T>
+    where
+        P: Clone + Send + Sync,
+        T: DeserializeOwned + Send,
+        F: Fn(T, P) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<serde_json::Value, HandlerError>> + Send,
+    {
+        async fn execute(
+            &self,
+            params: &JsonMap,
+            principal: &P,
+        ) -> Result<serde_json::Value, HandlerError> {
+            (self.f)(parse_params(params)?, principal.clone()).await
+        }
+    }
+
+    Arc::new(Typed {
+        f,
+        _params: PhantomData,
+    })
+}
+
+/// The [`DryRunHandler`] counterpart of [`typed_handler`].
+pub fn typed_dry_run<P, T, F, Fut>(f: F) -> Arc<dyn DryRunHandler<P>>
+where
+    P: Clone + Send + Sync + 'static,
+    T: DeserializeOwned + Send + 'static,
+    F: Fn(T, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<DryRunPreview, HandlerError>> + Send + 'static,
+{
+    struct Typed<F, T> {
+        f: F,
+        _params: PhantomData<fn() -> T>,
+    }
+
+    #[async_trait]
+    impl<P, T, F, Fut> DryRunHandler<P> for Typed<F, T>
+    where
+        P: Clone + Send + Sync,
+        T: DeserializeOwned + Send,
+        F: Fn(T, P) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<DryRunPreview, HandlerError>> + Send,
+    {
+        async fn dry_run(
+            &self,
+            params: &JsonMap,
+            principal: &P,
+        ) -> Result<DryRunPreview, HandlerError> {
+            (self.f)(parse_params(params)?, principal.clone()).await
+        }
+    }
+
+    Arc::new(Typed {
+        f,
+        _params: PhantomData,
+    })
 }
 
 /// Authorization decision from the app's permission system.
@@ -64,6 +247,54 @@ pub enum AuthzDecision {
 pub trait AuthzResolver<P>: Send + Sync {
     /// Decides whether `principal` may perform `action_id` with `params`.
     async fn authorize(&self, principal: &P, action_id: &str, params: &JsonMap) -> AuthzDecision;
+}
+
+/// Async closures are authz resolvers, mirroring the [`ActionHandler`]
+/// blanket impl — apps bridging an existing permission check don't need a
+/// trait impl.
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::JsonMap;
+/// use cleverhans_core::seams::{AuthzDecision, AuthzResolver};
+///
+/// #[derive(Clone)]
+/// struct User {
+///     admin: bool,
+/// }
+///
+/// let authz: Arc<dyn AuthzResolver<User>> =
+///     Arc::new(|user: User, action_id: String, _params: JsonMap| async move {
+///         if user.admin || !action_id.starts_with("admin.") {
+///             AuthzDecision::Allow
+///         } else {
+///             AuthzDecision::Deny("admins only".to_owned())
+///         }
+///     });
+/// ```
+#[async_trait]
+impl<P, F, Fut> AuthzResolver<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(P, String, JsonMap) -> Fut + Send + Sync,
+    Fut: Future<Output = AuthzDecision> + Send,
+{
+    async fn authorize(&self, principal: &P, action_id: &str, params: &JsonMap) -> AuthzDecision {
+        self(principal.clone(), action_id.to_owned(), params.clone()).await
+    }
+}
+
+/// An [`AuthzResolver`] that allows every action, for demos, tests, and
+/// apps whose transport-level auth is the whole permission model. Production
+/// apps with per-action permissions implement the trait (or pass a closure)
+/// over their real permission system.
+pub struct AllowAll;
+
+#[async_trait]
+impl<P: Send + Sync> AuthzResolver<P> for AllowAll {
+    async fn authorize(&self, _: &P, _: &str, _: &JsonMap) -> AuthzDecision {
+        AuthzDecision::Allow
+    }
 }
 
 /// Extracts context-sourced param values from the current context snapshot
@@ -84,9 +315,61 @@ pub trait ContextParamResolver: Send + Sync {
 /// dry-run preview. App code, not model output: even slot *content* comes
 /// from the app in the reference implementation, keeping the rendered UI
 /// fully closed-vocabulary.
+///
+/// Three ways to register one, in order of reach:
+///
+/// - fixed card content: [`static_slots`] with the [`slots!`](crate::slots)
+///   macro
+/// - content from params/preview: any closure, via the blanket impl below
+/// - content needing owned state (store handles, etc.): implement the trait
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::envelope::DryRunPreview;
+/// use cleverhans_core::seams::{SlotBuilder, static_slots};
+/// use cleverhans_core::{JsonMap, slots};
+///
+/// // Fixed:
+/// let publish = static_slots(slots! { "title": "Publish document" });
+///
+/// // Param-aware:
+/// let rename: Arc<dyn SlotBuilder> =
+///     Arc::new(|params: &JsonMap, _: Option<&DryRunPreview>| {
+///         slots! {
+///             "title": "Rename document",
+///             "detail": format!("New title: {}", params["title"]),
+///         }
+///     });
+/// ```
 pub trait SlotBuilder: Send + Sync {
     /// Produces the slot map validated against the block's slot schema.
     fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap;
+}
+
+/// Closures are slot builders, so per-action registrations stay inline.
+impl<F> SlotBuilder for F
+where
+    F: Fn(&JsonMap, Option<&DryRunPreview>) -> JsonMap + Send + Sync,
+{
+    fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
+        self(params, preview)
+    }
+}
+
+/// An `Arc`'d slot builder is a slot builder; see the matching
+/// [`ActionHandler`] impl for `Arc<dyn ActionHandler<P>>`.
+impl SlotBuilder for Arc<dyn SlotBuilder> {
+    fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
+        (**self).build(params, preview)
+    }
+}
+
+/// A [`SlotBuilder`] that emits the same slots for every proposal — for
+/// actions whose card content is fixed and the dry-run summary says the
+/// rest. See [`SlotBuilder`] for the full menu.
+#[must_use]
+pub fn static_slots(slots: JsonMap) -> Arc<dyn SlotBuilder> {
+    Arc::new(move |_: &JsonMap, _: Option<&DryRunPreview>| slots.clone())
 }
 
 /// One entry in the model-facing tool list, derived from the registry.

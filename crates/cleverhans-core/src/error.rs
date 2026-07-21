@@ -23,6 +23,24 @@ pub enum RegistryError {
     /// A mutating action was registered without a dry-run handler (spec §4).
     #[error("mutating action `{0}` must register a dry-run handler")]
     MissingDryRun(String),
+    /// A non-mutating action registered a dry-run handler, which validation
+    /// would never invoke — almost certainly a mismatch between the action
+    /// definition and the handler wiring.
+    #[error("action `{0}` does not mutate; its dry-run handler would never run")]
+    UnexpectedDryRun(String),
+    /// A schema-declared action was never given handlers via
+    /// [`crate::registry::RegistryBuilder::attach`].
+    #[error("action `{0}` from schema has no handler attached")]
+    UnattachedAction(String),
+    /// An `attach` call named an action the schema does not declare.
+    #[error("attach for `{0}` matches no schema action")]
+    UnknownAttachment(String),
+    /// The same action was attached more than once.
+    #[error("action `{0}` attached twice")]
+    DuplicateAttachment(String),
+    /// A [`crate::registry::RegistryBuilder::bind`] never set a handler.
+    #[error("binding for `{0}` sets no handler")]
+    MissingHandler(String),
 }
 
 /// A propose-time or confirm-time validation failure (spec §7.1).

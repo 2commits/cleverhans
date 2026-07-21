@@ -1,0 +1,12 @@
+{
+  "name": "cleverhans-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.8.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "codegen": "cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py",
+    "codegen:check": "cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py --check"
+  }
+}

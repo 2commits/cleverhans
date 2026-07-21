@@ -1,0 +1,23 @@
+{
+  "name": "unknown_action_declined",
+  "description": "A tool call naming an unregistered action is invalid and never renders (closed vocabulary); the scripted retry turn answers in text.",
+  "spec": ["3", "7.1", "12.2"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "made.up", "arguments": {} } } ],
+    [ { "text": "I don't have a tool for that." } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "do the thing", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "chat_message", "done": true, "text": "I don't have a tool for that." }
+    ] }
+  ],
+  "executions": []
+}

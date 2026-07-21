@@ -1,0 +1,11 @@
+{
+  "name": "init_sent_first",
+  "description": "The first client event on a stream is init, carrying the spec version and the initial context snapshot (spec §6.1, §13).",
+  "spec": ["6.1", "13"],
+  "steps": [
+    { "assert_sent_first": { "type": "init",
+                              "context": { "route": "/transactions/tx_581" } } },
+    { "client": { "send_message": "hi" } },
+    { "assert_sent": { "type": "user_message", "text": "hi" } }
+  ]
+}

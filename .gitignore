@@ -1,3 +1,15 @@
 /target
 node_modules/
 dist/
+
+# Python binding
+python/cleverhans-hitl/.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# napi build artifacts (rebuilt by `pnpm run build` in cleverhans-node)
+*.node
+typescript/cleverhans-node/index.js
+typescript/cleverhans-node/index.d.ts
+python/cleverhans-hitl/src/cleverhans_agent/_native.abi3.so

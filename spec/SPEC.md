@@ -92,6 +92,14 @@ Each registry entry carries:
 `handler` and `dry_run` are registry-resident but backend-private: they never cross the
 envelope.
 
+*Registry serialization (non-normative).* The wire-visible registry data — every field
+above except `handler` and `dry_run` — MAY be authored as a versioned declarative
+document. The reference implementation uses a JSON file with a `spec_version` field
+(§13): the framework loads it, the app attaches handlers by action ID at startup, and
+the build-time invariants above are enforced after attachment. The same document is the
+codegen input (§9) and the interchange format for conformance fixtures and non-Rust
+registry authors. It never crosses the wire.
+
 ### 4.1 Parameter sources
 
 Every parameter is tagged `source: context` or `source: utterance`:
@@ -482,7 +490,9 @@ Frontends MUST treat an unrecognized state as terminal and act on it no further 
 fail closed, render nothing new.
 
 Other conforming bindings (WebSocket + JSON-RPC, tRPC, SSE + POST upstream) are
-explicitly welcome. MCP is intentionally **not** the in-app transport — it earns its
+explicitly welcome. Language-neutral conformance vectors for the behavior this
+spec mandates live in [`spec/vectors/`](vectors/README.md); a conforming
+implementation is expected to pass them. MCP is intentionally **not** the in-app transport — it earns its
 place only for *external* agents driving the same action registry; for a first-party
 in-app agent it is overhead.
 

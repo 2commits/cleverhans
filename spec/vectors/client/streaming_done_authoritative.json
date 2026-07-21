@@ -1,0 +1,16 @@
+{
+  "name": "streaming_done_authoritative",
+  "description": "done:false fragments accumulate per msg_id; the closing done:true carries the authoritative full text and replaces whatever accumulated.",
+  "spec": ["6.3"],
+  "steps": [
+    { "client": { "send_message": "hi" } },
+    { "server": { "type": "chat_message", "msg_id": "m-1", "text": "He", "done": false } },
+    { "assert": { "busy": "streaming" } },
+    { "server": { "type": "chat_message", "msg_id": "m-1", "text": "Hello there.", "done": true } },
+    { "assert": { "busy": "idle",
+                  "transcript": [
+                    { "role": "user", "text": "hi" },
+                    { "role": "assistant", "text": "Hello there." }
+                  ] } }
+  ]
+}

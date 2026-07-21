@@ -1,0 +1,26 @@
+{
+  "name": "revalidation_failure_expires",
+  "description": "The stale-confirm backstop: authorization allows at propose time but is revoked before confirm; confirm-time revalidation expires the proposal and nothing executes.",
+  "spec": ["7.3", "12.8", "12.9"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "sequence": ["allow"], "then": { "deny": "permission revoked" } },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal", "proposal_id": { "$bind": "P" } }
+    ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" }, "state": "expired" }
+    ] }
+  ],
+  "executions": []
+}

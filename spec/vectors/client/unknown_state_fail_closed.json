@@ -1,0 +1,17 @@
+{
+  "name": "unknown_state_fail_closed",
+  "description": "An unrecognized lifecycle state on the wire is terminal: the proposal leaves pending and renders no further (spec §11 fail-closed rule).",
+  "spec": ["11"],
+  "steps": [
+    { "server": { "type": "action_proposal", "proposal_id": "prop-1",
+                  "action_id": "transaction.coBuyer.remove",
+                  "params": { "transactionId": "tx_581" },
+                  "block_type": "confirm", "slots": { "title": "Remove co-buyer" },
+                  "preview": { "affected_count": 1 }, "context_seq": 0 } },
+    { "assert": { "pending_count": 1 } },
+    { "server": { "type": "proposal_state_changed", "proposal_id": "prop-1",
+                  "state": "vaporized" } },
+    { "assert": { "pending_count": 0,
+                  "proposals": [ { "state": "unknown", "working": false } ] } }
+  ]
+}
