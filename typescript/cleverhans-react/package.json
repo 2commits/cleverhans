@@ -1,6 +1,6 @@
 {
   "name": "@cleverhans/react",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Headless React reference frontend for the CleverHans propose-only HITL agent protocol",
   "license": "MIT OR Apache-2.0",
   "repository": {
