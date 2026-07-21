@@ -17,7 +17,7 @@ import json
 import os
 import sys
 
-import cleverhans
+import cleverhans_agent
 
 # The declarative registry: pure data, the single source for validation,
 # codegen, and the model-facing tool list (spec §4).
@@ -54,7 +54,7 @@ DOCS = {"doc-7": {"title": "Q3 Roadmap", "published": False}}
 async def publish(params, principal):
     doc = DOCS.get(params["docId"])
     if doc is None:
-        raise cleverhans.Rejected("document not found")
+        raise cleverhans_agent.Rejected("document not found")
     doc["published"] = True
     return {"published": params["docId"], "by": principal["user_id"]}
 
@@ -62,7 +62,7 @@ async def publish(params, principal):
 async def publish_dry_run(params, principal):
     doc = DOCS.get(params["docId"])
     if doc is None:
-        raise cleverhans.Rejected("document not found")
+        raise cleverhans_agent.Rejected("document not found")
     return {
         "affected_count": 1,
         "sample_ids": [params["docId"]],
@@ -88,7 +88,7 @@ def pick_llm(utterance: str):
 
 async def main() -> None:
     utterance = sys.argv[1] if len(sys.argv) > 1 else "publish this document"
-    agent = cleverhans.Agent(
+    agent = cleverhans_agent.Agent(
         registry=REGISTRY,
         handlers={"doc.publish": publish},
         dry_runs={"doc.publish": publish_dry_run},
