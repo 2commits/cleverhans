@@ -168,7 +168,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "cleverhans"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "axum",
  "cleverhans-core",
@@ -184,14 +184,14 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-codegen"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "cleverhans-core",
 ]
 
 [[package]]
 name = "cleverhans-conformance"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-demo"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-evals"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-ffi"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-codegen",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-grpc"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-llm-anthropic"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-llm-ollama"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-node"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-py"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-ws"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "axum",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "cleverhans-ws-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "async-trait",
  "cleverhans-core",
