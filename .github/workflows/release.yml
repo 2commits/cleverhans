@@ -53,11 +53,15 @@ jobs:
           targets: ${{ matrix.settings.target }}
       - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: typescript/package.json
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+        working-directory: typescript
       - name: Build native module
         run: >
           pnpm exec napi build --platform --release
@@ -79,12 +83,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: typescript/package.json
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
+        working-directory: typescript
       - uses: actions/download-artifact@v8
         with:
           path: typescript/cleverhans-node/artifacts
