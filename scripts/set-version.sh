@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Sets the release version across every manifest in one go:
+# Cuts a release: sets the version across every manifest, commits, and
+# (each behind a y/N prompt) pushes the branch and pushes the vX.Y.Z tag —
+# the tag push is what triggers the publish workflow.
 #
 #   scripts/set-version.sh 0.2.0
 #   scripts/set-version.sh 0.2.0-rc.1
@@ -51,3 +53,43 @@ grep -m1 '^version = ' python/cleverhans-hitl/pyproject.toml
 for p in cleverhans-react cleverhans-ui cleverhans-node create-cleverhans; do
   echo "typescript/$p: $(node -p "require('./typescript/$p/package.json').version")"
 done
+
+confirm() {
+  local answer
+  read -r -p "$1 [y/N] " answer
+  [ "$answer" = "y" ] || [ "$answer" = "Y" ]
+}
+
+# Stage exactly the files this script touches, commit, tag.
+TAG="v$VERSION"
+BRANCH="$(git branch --show-current)"
+if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+  echo "tag $TAG already exists — aborting before commit" >&2
+  exit 1
+fi
+
+git add Cargo.toml Cargo.lock python/cleverhans-hitl/pyproject.toml \
+  typescript/cleverhans-react/package.json typescript/cleverhans-ui/package.json \
+  typescript/cleverhans-node/package.json typescript/create-cleverhans/package.json
+if git diff --cached --quiet; then
+  echo "(manifests already at $VERSION — nothing to commit)"
+else
+  git commit -m "release: $TAG"
+fi
+
+if confirm "push $BRANCH to origin?"; then
+  git push origin "$BRANCH"
+else
+  echo "(branch not pushed — the tag push below still uploads the release commit,"
+  echo " but $BRANCH on origin will not contain it)"
+fi
+
+git tag "$TAG"
+echo "tagged $TAG"
+
+if confirm "push $TAG to origin? (this publishes to crates.io, npm, and PyPI)"; then
+  git push origin "$TAG"
+  echo "release running: https://github.com/2commits/cleverhans/actions"
+else
+  echo "(tag kept local — publish later with: git push origin $TAG)"
+fi

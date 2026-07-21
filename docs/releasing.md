@@ -6,17 +6,16 @@ one go. Nothing publishes until the `semver` gate passes.
 
 ## Cutting a release
 
+One command, on the branch you release from:
+
 ```sh
-# 1. Bump every manifest to the new version (one command):
 scripts/set-version.sh 0.2.0
-
-# 2. Commit, PR, merge to main as usual.
-
-# 3. Tag the merge commit and push the tag:
-git checkout main && git pull
-git tag v0.2.0
-git push origin v0.2.0
 ```
+
+It bumps every manifest, commits `release: v0.2.0`, then prompts twice:
+push the branch, and push the tag. The tag push is the trigger — answering
+`N` keeps everything local (`git push origin v0.2.0` later publishes). The
+script aborts before committing if the tag already exists.
 
 ## What the `semver` gate enforces
 
