@@ -70,13 +70,11 @@ pub fn build_llm(spec: LlmSpec) -> Arc<dyn LlmProvider> {
             Arc::new(cleverhans_llm_ollama::OllamaProvider::new(config))
         }
         #[cfg(feature = "test-util")]
-        LlmSpec::Scripted { script } => {
-            Arc::new(cleverhans_core::test_util::ScriptedLlm::new(
-                script
-                    .into_iter()
-                    .map(|turn| turn.into_iter().map(Into::into).collect::<Vec<_>>()),
-            ))
-        }
+        LlmSpec::Scripted { script } => Arc::new(cleverhans_core::test_util::ScriptedLlm::new(
+            script
+                .into_iter()
+                .map(|turn| turn.into_iter().map(Into::into).collect::<Vec<_>>()),
+        )),
     }
 }
 

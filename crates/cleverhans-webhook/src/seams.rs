@@ -174,7 +174,12 @@ impl WebhookAuthz {
 
 #[async_trait]
 impl AuthzResolver<Value> for WebhookAuthz {
-    async fn authorize(&self, principal: &Value, action_id: &str, params: &JsonMap) -> AuthzDecision {
+    async fn authorize(
+        &self,
+        principal: &Value,
+        action_id: &str,
+        params: &JsonMap,
+    ) -> AuthzDecision {
         let request = match seam_request(SeamKind::Authorize, action_id, params, principal) {
             Ok(request) => request,
             Err(err) => return AuthzDecision::Deny(err.to_string()),

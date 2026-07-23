@@ -32,7 +32,11 @@ struct Stub {
     delay: Option<Duration>,
 }
 
-async fn stub_handler(State(stub): State<Stub>, headers: HeaderMap, body: Bytes) -> impl IntoResponse {
+async fn stub_handler(
+    State(stub): State<Stub>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
     // Record before any delay: on a client-side timeout hyper drops this
     // future, and the delivery must still be observable.
     let parsed: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
@@ -57,14 +61,19 @@ async fn stub_handler(State(stub): State<Stub>, headers: HeaderMap, body: Bytes)
     )
 }
 
-async fn serve_stub(script: Vec<(u16, Value)>, delay: Option<Duration>) -> (SocketAddr, Deliveries) {
+async fn serve_stub(
+    script: Vec<(u16, Value)>,
+    delay: Option<Duration>,
+) -> (SocketAddr, Deliveries) {
     let deliveries: Deliveries = Arc::new(Mutex::new(Vec::new()));
     let stub = Stub {
         deliveries: Arc::clone(&deliveries),
         script: Arc::new(Mutex::new(script)),
         delay,
     };
-    let app = Router::new().route("/hook", post(stub_handler)).with_state(stub);
+    let app = Router::new()
+        .route("/hook", post(stub_handler))
+        .with_state(stub);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
@@ -111,11 +120,17 @@ fn wrapped() -> Value {
 
 #[tokio::test]
 async fn execute_delivers_the_contract_shape_and_returns_the_result() {
-    let (addr, deliveries) =
-        serve_stub(vec![(200, json!({"outcome": "executed", "result": {"ok": true}}))], None).await;
+    let (addr, deliveries) = serve_stub(
+        vec![(200, json!({"outcome": "executed", "result": {"ok": true}}))],
+        None,
+    )
+    .await;
     let handler = WebhookHandler::new(client(addr, None), "record.touch", route());
 
-    let result = handler.execute(&params(), &wrapped()).await.expect("executed");
+    let result = handler
+        .execute(&params(), &wrapped())
+        .await
+        .expect("executed");
 
     assert_eq!(result, json!({"ok": true}));
     let log = deliveries.lock().expect("lock");
@@ -129,7 +144,10 @@ async fn execute_delivers_the_contract_shape_and_returns_the_result() {
     assert_eq!(body["action_id"], "record.touch");
     assert_eq!(body["params"], json!({"recordId": "r-1"}));
     // The wire carries the host principal verbatim — no session envelope.
-    assert_eq!(body["principal"], json!({"user_id": "alex", "roles": ["editor"]}));
+    assert_eq!(
+        body["principal"],
+        json!({"user_id": "alex", "roles": ["editor"]})
+    );
     assert_eq!(body["attempt"], 1);
     assert!(body["idempotency_key"].is_string());
     assert!(body.get("headers").is_none());
@@ -137,11 +155,17 @@ async fn execute_delivers_the_contract_shape_and_returns_the_result() {
 
 #[tokio::test]
 async fn execute_rejected_maps_to_handler_rejected_with_the_host_reason() {
-    let (addr, _) =
-        serve_stub(vec![(200, json!({"outcome": "rejected", "reason": "locked"}))], None).await;
+    let (addr, _) = serve_stub(
+        vec![(200, json!({"outcome": "rejected", "reason": "locked"}))],
+        None,
+    )
+    .await;
     let handler = WebhookHandler::new(client(addr, None), "record.touch", route());
 
-    let err = handler.execute(&params(), &wrapped()).await.expect_err("rejected");
+    let err = handler
+        .execute(&params(), &wrapped())
+        .await
+        .expect_err("rejected");
 
     assert_eq!(err.to_string(), "rejected: locked");
 }
@@ -151,10 +175,17 @@ async fn execute_5xx_is_answered_internal_and_never_retried() {
     let (addr, deliveries) = serve_stub(vec![(500, json!({"error": "boom"}))], None).await;
     let handler = WebhookHandler::new(client(addr, None), "record.touch", route());
 
-    let err = handler.execute(&params(), &wrapped()).await.expect_err("internal");
+    let err = handler
+        .execute(&params(), &wrapped())
+        .await
+        .expect_err("internal");
 
     assert!(err.to_string().starts_with("internal:"), "got {err}");
-    assert_eq!(deliveries.lock().expect("lock").len(), 1, "answered call retried");
+    assert_eq!(
+        deliveries.lock().expect("lock").len(),
+        1,
+        "answered call retried"
+    );
 }
 
 #[tokio::test]
@@ -172,7 +203,10 @@ async fn execute_timeout_retries_with_the_same_idempotency_key() {
         route(),
     );
 
-    let err = handler.execute(&params(), &wrapped()).await.expect_err("unknown");
+    let err = handler
+        .execute(&params(), &wrapped())
+        .await
+        .expect_err("unknown");
 
     assert_eq!(err.to_string(), "internal: execution outcome unknown");
     // Give the delayed stub handlers time to record both deliveries.
@@ -192,7 +226,10 @@ async fn execute_timeout_retries_with_the_same_idempotency_key() {
 async fn dry_run_maps_preview_rejected_and_failure() {
     let (addr, _) = serve_stub(
         vec![
-            (200, json!({"outcome": "preview", "preview": {"affected_count": 2}})),
+            (
+                200,
+                json!({"outcome": "preview", "preview": {"affected_count": 2}}),
+            ),
             (200, json!({"outcome": "rejected", "reason": "no access"})),
             (500, json!({})),
         ],
@@ -201,13 +238,22 @@ async fn dry_run_maps_preview_rejected_and_failure() {
     .await;
     let dry_run = WebhookDryRun::new(client(addr, None), "record.touch", route());
 
-    let preview = dry_run.dry_run(&params(), &wrapped()).await.expect("preview");
+    let preview = dry_run
+        .dry_run(&params(), &wrapped())
+        .await
+        .expect("preview");
     assert_eq!(preview.affected_count, 2);
 
-    let rejected = dry_run.dry_run(&params(), &wrapped()).await.expect_err("rejected");
+    let rejected = dry_run
+        .dry_run(&params(), &wrapped())
+        .await
+        .expect_err("rejected");
     assert_eq!(rejected.to_string(), "rejected: no access");
 
-    let failed = dry_run.dry_run(&params(), &wrapped()).await.expect_err("internal");
+    let failed = dry_run
+        .dry_run(&params(), &wrapped())
+        .await
+        .expect_err("internal");
     assert!(failed.to_string().starts_with("internal:"), "got {failed}");
 }
 
@@ -255,7 +301,12 @@ async fn verify_forwards_only_allowlisted_headers_and_wraps_the_principal() {
     let principal = verifier.verify(&headers).await.expect("established");
 
     assert_eq!(principal["principal"], json!({"user_id": "u_1"}));
-    assert!(principal["session_id"].as_str().expect("session id").starts_with("s_"));
+    assert!(
+        principal["session_id"]
+            .as_str()
+            .expect("session id")
+            .starts_with("s_")
+    );
     let log = deliveries.lock().expect("lock");
     assert_eq!(
         log[0].2["headers"],
@@ -266,15 +317,25 @@ async fn verify_forwards_only_allowlisted_headers_and_wraps_the_principal() {
 
 #[tokio::test]
 async fn verify_maps_refusals_and_failures_per_the_spec_table() {
-    let (addr, _) = serve_stub(vec![(401, json!({"reason": "expired"})), (500, json!({}))], None).await;
+    let (addr, _) = serve_stub(
+        vec![(401, json!({"reason": "expired"})), (500, json!({}))],
+        None,
+    )
+    .await;
     let verifier = WebhookVerifier::new(client(addr, None), route(), vec![]);
 
     assert_eq!(
-        verifier.verify(&http::HeaderMap::new()).await.expect_err("refused"),
+        verifier
+            .verify(&http::HeaderMap::new())
+            .await
+            .expect_err("refused"),
         http::StatusCode::UNAUTHORIZED
     );
     assert_eq!(
-        verifier.verify(&http::HeaderMap::new()).await.expect_err("failed closed"),
+        verifier
+            .verify(&http::HeaderMap::new())
+            .await
+            .expect_err("failed closed"),
         http::StatusCode::SERVICE_UNAVAILABLE
     );
 }

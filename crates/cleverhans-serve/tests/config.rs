@@ -81,7 +81,10 @@ title = { const = "Open record" }
     .expect("parses");
     let resolved = config.resolve(&schema()).expect("resolves");
 
-    assert_eq!(resolved.actions["record.archive"].execute.path, "/special/archive");
+    assert_eq!(
+        resolved.actions["record.archive"].execute.path,
+        "/special/archive"
+    );
     assert_eq!(
         resolved.actions["record.open"].execute.path,
         "/hooks/record.open/execute"
@@ -101,7 +104,9 @@ slots = { title = { const = "t" } }
 "#,
     ))
     .expect("parses");
-    let err = config.resolve(&schema()).expect_err("record.open uncovered");
+    let err = config
+        .resolve(&schema())
+        .expect_err("record.open uncovered");
     assert!(err.to_string().contains("record.open"), "got {err}");
 }
 
@@ -168,8 +173,9 @@ execute = "POST /nope"
 #[test]
 fn missing_secret_env_names_the_variable() {
     let toml = BASE.replace("CFG_TEST_SECRET", "CFG_TEST_SECRET_UNSET");
-    let config = Config::from_toml(&with_actions(
-        r#"
+    let config = Config::from_toml(
+        &with_actions(
+            r#"
 [actions."*"]
 execute = "POST /hooks/{action}"
 dry_run = "POST /hooks/{action}/preview"
@@ -179,7 +185,9 @@ title = { const = "t" }
 [actions."record.open".slots]
 title = { const = "t" }
 "#,
-    ).replacen(BASE, &toml, 1))
+        )
+        .replacen(BASE, &toml, 1),
+    )
     .expect("parses");
     let err = config.resolve(&schema()).expect_err("missing env");
     assert!(matches!(err, ConfigError::MissingEnv(ref name, _) if name == "CFG_TEST_SECRET_UNSET"));
@@ -205,7 +213,10 @@ fn llm_section_resolves_and_refuses() {
     ))
     .expect("parses");
     let err = anthropic.llm.resolve().expect_err("missing key env");
-    assert!(err.to_string().contains("CFG_TEST_NO_SUCH_KEY"), "got {err}");
+    assert!(
+        err.to_string().contains("CFG_TEST_NO_SUCH_KEY"),
+        "got {err}"
+    );
 }
 
 #[test]

@@ -9,7 +9,9 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 
 use cleverhans_conformance::fixture::AuthzScript;
-use cleverhans_conformance::mock_host::{HostBehavior, HostResponse, HostScript, default_principal};
+use cleverhans_conformance::mock_host::{
+    HostBehavior, HostResponse, HostScript, default_principal,
+};
 use cleverhans_conformance::{Fixture, MockHost};
 use cleverhans_serve::config::Config;
 use cleverhans_serve::{build_app, load_schema};
@@ -77,7 +79,9 @@ async fn serve_app(host: &MockHost) -> SocketAddr {
     let resolved = config.resolve(&schema).expect("resolve");
     let llm = cleverhans::llm::build_llm(config.llm.resolve().expect("llm"));
     let app = build_app(&resolved, &schema, llm).expect("build app");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -137,8 +141,7 @@ async fn full_confirm_flow_executes_through_the_webhooks() {
     assert_eq!(proposal["preview"]["affected_count"], 1);
 
     ws.send(Message::Text(
-        json!({"type": "confirm_action", "proposal_id": proposal["proposal_id"]})
-            .to_string(),
+        json!({"type": "confirm_action", "proposal_id": proposal["proposal_id"]}).to_string(),
     ))
     .await
     .expect("send confirm");
@@ -155,10 +158,7 @@ async fn full_confirm_flow_executes_through_the_webhooks() {
         .find(|delivery| delivery.endpoint == "execute")
         .expect("an execute delivery");
     assert_eq!(execute.body["principal"], default_principal());
-    assert_eq!(
-        execute.headers["authorization"],
-        format!("Bearer {SECRET}")
-    );
+    assert_eq!(execute.headers["authorization"], format!("Bearer {SECRET}"));
 }
 
 #[tokio::test]

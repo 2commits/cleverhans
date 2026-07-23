@@ -146,7 +146,9 @@ async fn dry_run(
         return unknown_action(action_id);
     };
     match dry_run.dry_run(&params, &user).await {
-        Ok(preview) => axum::Json(json!({"outcome": "preview", "preview": preview})).into_response(),
+        Ok(preview) => {
+            axum::Json(json!({"outcome": "preview", "preview": preview})).into_response()
+        }
         Err(HandlerError::Rejected(reason)) => {
             axum::Json(json!({"outcome": "rejected", "reason": reason})).into_response()
         }
@@ -166,7 +168,10 @@ async fn execute(
         Ok(parts) => parts,
         Err(refusal) => return *refusal,
     };
-    let key = body["idempotency_key"].as_str().unwrap_or_default().to_owned();
+    let key = body["idempotency_key"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     if let Some(previous) = state.executed.lock().expect("executed").get(&key) {
         return axum::Json(previous.clone()).into_response();
     }

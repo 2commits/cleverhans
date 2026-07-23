@@ -244,7 +244,8 @@ pub async fn run_service_vector(fixture: &Fixture, vector: &ServiceVector) -> Re
         &vector.service_config.secret,
     )
     .await;
-    let (agent, client) = build_webhook_agent(fixture, &vector.llm, &host, &vector.service_config.secret);
+    let (agent, client) =
+        build_webhook_agent(fixture, &vector.llm, &host, &vector.service_config.secret);
     let verifier = WebhookVerifier::new(
         client,
         Route::from_str(&format!("POST {VERIFY_SESSION_PATH}")).expect("route"),
@@ -334,12 +335,7 @@ pub async fn run_service_vector(fixture: &Fixture, vector: &ServiceVector) -> Re
             serde_json::to_string(&deliveries).unwrap_or_default()
         ));
     }
-    for (index, (want, got)) in vector
-        .expect_deliveries
-        .iter()
-        .zip(&deliveries)
-        .enumerate()
-    {
+    for (index, (want, got)) in vector.expect_deliveries.iter().zip(&deliveries).enumerate() {
         match_value(want, got, &mut bindings, &format!("delivery[{index}]"))
             .map_err(|err| format!("delivery {index}: {err}"))?;
     }

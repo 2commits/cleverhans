@@ -77,9 +77,8 @@ pub struct TimeoutsSection {
 impl TimeoutsSection {
     fn resolve(&self) -> Timeouts {
         let defaults = Timeouts::default();
-        let ms = |value: Option<u64>, default: Duration| {
-            value.map_or(default, Duration::from_millis)
-        };
+        let ms =
+            |value: Option<u64>, default: Duration| value.map_or(default, Duration::from_millis);
         Timeouts {
             verify_session: ms(self.verify_ms, defaults.verify_session),
             authorize: ms(self.authorize_ms, defaults.authorize),
@@ -348,14 +347,11 @@ impl Config {
         for def in &schema.actions {
             let entry = self.actions.get(&def.id);
             let template = |field: fn(&ActionSection) -> Option<&str>| -> Option<String> {
-                entry
-                    .and_then(field)
-                    .map(str::to_owned)
-                    .or_else(|| {
-                        wildcard
-                            .and_then(field)
-                            .map(|route| route.replace("{action}", &def.id))
-                    })
+                entry.and_then(field).map(str::to_owned).or_else(|| {
+                    wildcard
+                        .and_then(field)
+                        .map(|route| route.replace("{action}", &def.id))
+                })
             };
             let execute = template(|section| section.execute.as_deref()).ok_or_else(|| {
                 ConfigError::Coverage(format!(
@@ -372,7 +368,11 @@ impl Config {
                 )));
             }
             let slots = entry.and_then(|section| section.slots.clone());
-            if let Some(block) = schema.blocks.iter().find(|b| b.block_type == def.block_type) {
+            if let Some(block) = schema
+                .blocks
+                .iter()
+                .find(|b| b.block_type == def.block_type)
+            {
                 for slot in &block.slots {
                     if slot.required && !slots.as_ref().is_some_and(|s| s.contains_key(&slot.name))
                     {

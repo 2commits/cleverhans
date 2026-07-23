@@ -320,10 +320,32 @@ mod tests {
         let mut bindings = Bindings::default();
         match_value(&json!({"$bind": "D"}), &json!("d-1"), &mut bindings, "root").expect("bind");
 
-        assert!(match_value(&json!({"$differs": "D"}), &json!("d-2"), &mut bindings, "root").is_ok());
-        assert!(match_value(&json!({"$differs": "D"}), &json!("d-1"), &mut bindings, "root").is_err());
         assert!(
-            match_value(&json!({"$differs": "NEVER"}), &json!("x"), &mut bindings, "root").is_err(),
+            match_value(
+                &json!({"$differs": "D"}),
+                &json!("d-2"),
+                &mut bindings,
+                "root"
+            )
+            .is_ok()
+        );
+        assert!(
+            match_value(
+                &json!({"$differs": "D"}),
+                &json!("d-1"),
+                &mut bindings,
+                "root"
+            )
+            .is_err()
+        );
+        assert!(
+            match_value(
+                &json!({"$differs": "NEVER"}),
+                &json!("x"),
+                &mut bindings,
+                "root"
+            )
+            .is_err(),
             "unbound name is a vector-authoring error"
         );
     }

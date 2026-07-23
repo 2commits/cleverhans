@@ -62,7 +62,10 @@ fn request_bodies_match_the_schema_required_sets() {
         principal: json!({}),
     })
     .expect("serializes");
-    assert_eq!(body_keys(&seam), required_keys(&schema("authorize.request")));
+    assert_eq!(
+        body_keys(&seam),
+        required_keys(&schema("authorize.request"))
+    );
     assert_eq!(body_keys(&seam), required_keys(&schema("dry_run.request")));
 
     let execute = serde_json::to_value(ExecuteRequest {
@@ -76,7 +79,10 @@ fn request_bodies_match_the_schema_required_sets() {
         attempt: 1,
     })
     .expect("serializes");
-    assert_eq!(body_keys(&execute), required_keys(&schema("execute.request")));
+    assert_eq!(
+        body_keys(&execute),
+        required_keys(&schema("execute.request"))
+    );
 }
 
 #[test]
@@ -97,7 +103,10 @@ fn response_bodies_deserialize_from_schema_shaped_documents() {
     assert!(matches!(preview, DryRunResponse::Preview { .. }));
     let rejected: DryRunResponse =
         serde_json::from_value(json!({"outcome": "rejected"})).expect("rejected");
-    assert!(matches!(rejected, DryRunResponse::Rejected { reason: None }));
+    assert!(matches!(
+        rejected,
+        DryRunResponse::Rejected { reason: None }
+    ));
 
     let executed: ExecuteResponse =
         serde_json::from_value(json!({"outcome": "executed", "result": {"ok": true}}))
@@ -107,6 +116,8 @@ fn response_bodies_deserialize_from_schema_shaped_documents() {
         serde_json::from_value(json!({"outcome": "executed"})).expect("executed without result");
     assert!(matches!(
         no_result,
-        ExecuteResponse::Executed { result: Value::Null }
+        ExecuteResponse::Executed {
+            result: Value::Null
+        }
     ));
 }

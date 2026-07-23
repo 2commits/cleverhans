@@ -97,7 +97,10 @@ async fn every_service_vector_passes() {
     let mut lines = Vec::new();
     let mut failures = 0usize;
     for (file, vector) in &vectors {
-        assert_eq!(&vector.name, file, "vector name must match file stem: {file}");
+        assert_eq!(
+            &vector.name, file,
+            "vector name must match file stem: {file}"
+        );
         assert_eq!(vector.layer, "webhook-service", "{file}: wrong layer");
         let fixture = fixtures
             .get(&vector.fixture)
@@ -122,7 +125,10 @@ async fn the_mock_host_passes_every_host_vector() {
     let mut lines = Vec::new();
     let mut failures = 0usize;
     for (file, vector) in &vectors {
-        assert_eq!(&vector.name, file, "vector name must match file stem: {file}");
+        assert_eq!(
+            &vector.name, file,
+            "vector name must match file stem: {file}"
+        );
         assert_eq!(vector.layer, "webhook-host", "{file}: wrong layer");
         let fixture = fixtures
             .get(&vector.fixture)

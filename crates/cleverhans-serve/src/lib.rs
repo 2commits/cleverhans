@@ -49,10 +49,9 @@ struct VerifierExtractor(WebhookVerifier);
 #[async_trait]
 impl AsyncPrincipalExtractor<Value> for VerifierExtractor {
     async fn extract(&self, headers: &HeaderMap) -> Result<Value, StatusCode> {
-        self.0
-            .verify(headers)
-            .await
-            .map_err(|status| StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::SERVICE_UNAVAILABLE))
+        self.0.verify(headers).await.map_err(|status| {
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::SERVICE_UNAVAILABLE)
+        })
     }
 }
 
@@ -75,8 +74,11 @@ pub fn build_app(
             BuildError::Registry(format!("no resolved routes for action `{}`", def.id))
         })?;
         let dry_run = action.dry_run.clone().map(|route| {
-            Arc::new(WebhookDryRun::new(Arc::clone(&client), def.id.clone(), route))
-                as Arc<dyn DryRunHandler<Value>>
+            Arc::new(WebhookDryRun::new(
+                Arc::clone(&client),
+                def.id.clone(),
+                route,
+            )) as Arc<dyn DryRunHandler<Value>>
         });
         builder = builder.attach(
             def.id.clone(),

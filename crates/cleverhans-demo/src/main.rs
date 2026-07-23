@@ -110,8 +110,8 @@ async fn main() -> anyhow::Result<()> {
         }
         Some("host") => {
             let bind = args.get(2).map_or("127.0.0.1:8791", String::as_str);
-            let secret = std::env::var("CLEVERHANS_DEMO_SECRET")
-                .unwrap_or_else(|_| "dev-secret".to_owned());
+            let secret =
+                std::env::var("CLEVERHANS_DEMO_SECRET").unwrap_or_else(|_| "dev-secret".to_owned());
             host::host(bind, secret).await
         }
         _ => bail!("usage: cleverhans-demo <serve | eval cases.json | host [bind]>"),

@@ -199,7 +199,11 @@ fn check_headers(state: &HostState, headers: &HeaderMap) -> Result<(), Box<Respo
         == Some(&format!("Bearer {}", state.secret));
     if !authorized {
         return Err(Box::new(
-            (StatusCode::UNAUTHORIZED, axum::Json(json!({"error": "bad secret"}))).into_response(),
+            (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(json!({"error": "bad secret"})),
+            )
+                .into_response(),
         ));
     }
     let version = headers
@@ -224,19 +228,23 @@ async fn record_and_override(
     headers: &HeaderMap,
     body: &Value,
 ) -> Option<Response> {
-    state.deliveries.lock().expect("delivery log").push(Delivery {
-        endpoint: endpoint.to_owned(),
-        headers: headers
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_owned(),
-                    value.to_str().unwrap_or_default().to_owned(),
-                )
-            })
-            .collect(),
-        body: body.clone(),
-    });
+    state
+        .deliveries
+        .lock()
+        .expect("delivery log")
+        .push(Delivery {
+            endpoint: endpoint.to_owned(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        name.as_str().to_owned(),
+                        value.to_str().unwrap_or_default().to_owned(),
+                    )
+                })
+                .collect(),
+            body: body.clone(),
+        });
     let behavior = {
         let script = state.overrides.get(endpoint)?;
         let mut cursors = state.cursors.lock().expect("cursors");
@@ -330,9 +338,7 @@ async fn dry_run(State(state): State<Arc<HostState>>, headers: HeaderMap, body: 
     };
     let behavior = match &script {
         DryRunScript::One(behavior) => behavior.clone(),
-        DryRunScript::Sequence { sequence, then } => {
-            sequence.get(call).unwrap_or(then).clone()
-        }
+        DryRunScript::Sequence { sequence, then } => sequence.get(call).unwrap_or(then).clone(),
     };
     let response = match behavior {
         DryRunBehavior::Preview(preview) => {
@@ -353,7 +359,10 @@ async fn execute(State(state): State<Arc<HostState>>, headers: HeaderMap, body: 
     }
     // §12.14: idempotent replay returns the first outcome without a second
     // execution.
-    let key = body["idempotency_key"].as_str().unwrap_or_default().to_owned();
+    let key = body["idempotency_key"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     if let Some(previous) = state.executed.lock().expect("executed").get(&key) {
         return axum::Json(previous.clone()).into_response();
     }
