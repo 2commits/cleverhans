@@ -1,8 +1,10 @@
 # Releasing
 
 Releases are semver-tagged: pushing `vMAJOR.MINOR.PATCH[-prerelease]` runs
-`.github/workflows/release.yml`, which publishes crates.io + npm + PyPI in
-one go. Nothing publishes until the `semver` gate passes.
+`.github/workflows/release.yml`, which publishes crates.io + npm + PyPI,
+uploads `cleverhans` service binaries (5 platforms + linux musl) to the
+GitHub Release, and pushes the multi-arch service image to ghcr.io — in one
+go. Nothing publishes until the `semver` gate passes.
 
 ## Cutting a release
 

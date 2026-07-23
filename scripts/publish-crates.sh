@@ -23,6 +23,9 @@ CRATES=(
   cleverhans-evals
   cleverhans-codegen
   cleverhans
+  cleverhans-webhook
+  cleverhans-conformance
+  cleverhans-serve
 )
 
 VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
