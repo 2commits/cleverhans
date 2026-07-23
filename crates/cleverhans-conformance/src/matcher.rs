@@ -4,7 +4,8 @@
 //! - objects match by subset (additive envelope evolution, spec §13)
 //! - arrays match element-wise with exact length
 //! - expected lists match actual lists exactly in count and order
-//! - directives: `$bind`, `$ref`, `$exact`, `$keys`, `$absent`
+//! - directives: `$bind`, `$ref`, `$exact`, `$keys`, `$absent`, `$differs`,
+//!   `$in`
 
 use std::collections::BTreeMap;
 
@@ -84,7 +85,12 @@ pub fn match_events(
     Ok(())
 }
 
-fn match_value(
+/// Matches one expected value (with directives) against an actual value.
+///
+/// # Errors
+///
+/// A human-readable mismatch description with the matcher path.
+pub fn match_value(
     expected: &Value,
     actual: &Value,
     bindings: &mut Bindings,
@@ -100,6 +106,12 @@ fn match_value(
         (Value::Object(want), Value::Object(got)) => {
             for (key, want_value) in want {
                 let field_path = format!("{path}.{key}");
+                // `$keys` beside sibling matchers pins the object's key set
+                // while the siblings match values as usual.
+                if key == "$keys" {
+                    match_directive("$keys", want_value, actual, bindings, path)?;
+                    continue;
+                }
                 if is_absent_directive(want_value) {
                     if got.get(key).is_some_and(|v| !v.is_null()) {
                         return Err(format!("{field_path}: expected absent, got {}", got[key]));
@@ -207,6 +219,31 @@ fn match_directive(
                 Err(format!("{path}: expected absent, got {actual}"))
             }
         }
+        "$differs" => {
+            let name = arg
+                .as_str()
+                .ok_or_else(|| format!("{path}: $differs takes a name string"))?;
+            let bound = bindings
+                .get(name)
+                .ok_or_else(|| format!("{path}: $differs against unbound name `{name}`"))?;
+            if bound == actual {
+                Err(format!(
+                    "{path}: expected a value differing from bound `{name}` = {bound}"
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        "$in" => {
+            let options = arg
+                .as_array()
+                .ok_or_else(|| format!("{path}: $in takes an array"))?;
+            if options.contains(actual) {
+                Ok(())
+            } else {
+                Err(format!("{path}: expected one of {arg}, got {actual}"))
+            }
+        }
         other => Err(format!("{path}: unknown directive `{other}`")),
     }
 }
@@ -276,5 +313,24 @@ mod tests {
     fn arrays_need_exact_length() {
         assert!(matches(json!([1, 2]), json!([1, 2])).is_ok());
         assert!(matches(json!([1]), json!([1, 2])).is_err());
+    }
+
+    #[test]
+    fn differs_requires_inequality_with_the_bound_value() {
+        let mut bindings = Bindings::default();
+        match_value(&json!({"$bind": "D"}), &json!("d-1"), &mut bindings, "root").expect("bind");
+
+        assert!(match_value(&json!({"$differs": "D"}), &json!("d-2"), &mut bindings, "root").is_ok());
+        assert!(match_value(&json!({"$differs": "D"}), &json!("d-1"), &mut bindings, "root").is_err());
+        assert!(
+            match_value(&json!({"$differs": "NEVER"}), &json!("x"), &mut bindings, "root").is_err(),
+            "unbound name is a vector-authoring error"
+        );
+    }
+
+    #[test]
+    fn in_matches_any_listed_value() {
+        assert!(matches(json!({"$in": [401, 403]}), json!(403)).is_ok());
+        assert!(matches(json!({"$in": [401, 403]}), json!(500)).is_err());
     }
 }

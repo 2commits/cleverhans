@@ -12,6 +12,8 @@ members = [
     "crates/cleverhans-llm-ollama",
     "crates/cleverhans-node",
     "crates/cleverhans-py",
+    "crates/cleverhans-serve",
+    "crates/cleverhans-webhook",
     "crates/cleverhans-ws",
     "crates/cleverhans-ws-core",
 ]
@@ -45,8 +47,8 @@ repository = "https://github.com/2commits/cleverhans"
 [workspace.dependencies]
 # Internal crates carry both `path` (workspace builds) and `version`
 # (crates.io resolution) — `cargo publish` rejects path-only dependencies.
-# conformance/ffi stay `publish = false`; they carry a version anyway so
-# `cargo package --workspace` can verify the crates that depend on them.
+# ffi stays `publish = false`; it carries a version anyway so
+# `cargo package --workspace` can verify the crates that depend on it.
 cleverhans-core = { path = "crates/cleverhans-core", version = "0.1.4" }
 cleverhans-ws-core = { path = "crates/cleverhans-ws-core", version = "0.1.4" }
 cleverhans-ws = { path = "crates/cleverhans-ws", version = "0.1.4" }
@@ -57,6 +59,8 @@ cleverhans-codegen = { path = "crates/cleverhans-codegen", version = "0.1.4" }
 cleverhans = { path = "crates/cleverhans", version = "0.1.4" }
 cleverhans-conformance = { path = "crates/cleverhans-conformance", version = "0.1.4" }
 cleverhans-ffi = { path = "crates/cleverhans-ffi", version = "0.1.4" }
+cleverhans-serve = { path = "crates/cleverhans-serve", version = "0.1.4" }
+cleverhans-webhook = { path = "crates/cleverhans-webhook", version = "0.1.4" }
 
 async-stream = "0.3"
 async-trait = "0.1"

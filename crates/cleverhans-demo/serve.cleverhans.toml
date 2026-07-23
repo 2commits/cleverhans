@@ -1,0 +1,62 @@
+# `cleverhans serve` config paired with `cleverhans-demo host` — the
+# recommended way to test the standalone service binary with a real,
+# stateful backend and the React playground:
+#
+#   # terminal 1 — the demo document store behind the §14 webhooks
+#   cargo run -p cleverhans-demo -- host
+#
+#   # terminal 2 — the service under test (bind 8787 so the playground
+#   # connects unchanged)
+#   CLEVERHANS_UPSTREAM_SECRET=dev-secret ANTHROPIC_API_KEY=... \
+#     cargo run -p cleverhans-serve --bin cleverhans -- serve \
+#       --registry crates/cleverhans-demo/registry.json \
+#       --config crates/cleverhans-demo/serve.cleverhans.toml \
+#       --bind 127.0.0.1:8787
+#
+#   # terminal 3 — the click-around UI
+#   pnpm --filter @cleverhans/playground dev
+#
+# Renames/publishes/deletes then execute in the host's store over the
+# webhooks and fold back into the playground page. Restart the host to
+# reseed.
+
+[server]
+bind = "127.0.0.1:8787"
+path = "/agent"
+
+[upstream]
+base_url = "http://127.0.0.1:8791"
+secret_env = "CLEVERHANS_UPSTREAM_SECRET"
+
+[auth]
+verify = "POST /cleverhans/verify_session"
+
+[authz]
+endpoint = "POST /cleverhans/authorize"
+
+[llm]
+provider = "anthropic"          # or: provider = "ollama", model = "qwen3"
+
+[agent]
+app_instructions = "You are the assistant inside a document-management app. Keep answers short."
+
+[actions."*"]
+execute = "POST /cleverhans/execute"
+dry_run = "POST /cleverhans/dry_run"
+
+# Slot phrasing is service-side config in this topology (§9.7 semantics);
+# the in-process demo's dynamic slot builders are approximated declaratively.
+[actions."document.rename".slots]
+title = { const = "Rename document" }
+detail = { param = "title" }
+
+[actions."document.publish".slots]
+title = { const = "Publish document" }
+detail = { preview = "summary" }
+
+[actions."document.archive".slots]
+title = { const = "Archive document" }
+detail = { preview = "summary" }
+
+[actions."documents.deleteByStatus".slots]
+title = { const = "Bulk delete documents" }

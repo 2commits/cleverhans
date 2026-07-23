@@ -1,0 +1,16 @@
+{
+  "name": "unknown_version_rejected",
+  "description": "§14.2: an unknown X-CleverHans-Webhook-Version MUST be rejected with 400 and an unsupported_webhook_version error body listing supported versions.",
+  "spec": ["14.2"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "requests": [
+    { "endpoint": "authorize", "auth": "valid", "webhook_version": 999,
+      "body": { "webhook_version": 999, "kind": "authorize", "session_id": "s_hostcheck_7",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "user_id": "u_1" } },
+      "expect": { "status": 400,
+                  "body": { "error": "unsupported_webhook_version", "supported": [1] } } }
+  ]
+}

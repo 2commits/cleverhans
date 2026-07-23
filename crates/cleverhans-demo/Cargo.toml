@@ -10,11 +10,12 @@ publish = false
 [dependencies]
 anyhow = "1"
 async-trait = { workspace = true }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 cleverhans = { workspace = true, features = ["ws", "anthropic", "ollama", "evals"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "fs"] }
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]

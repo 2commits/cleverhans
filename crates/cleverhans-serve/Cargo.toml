@@ -1,0 +1,37 @@
+[package]
+name = "cleverhans-serve"
+description = "Standalone CleverHans agent service: host the propose-only HITL agent from any backend language via the spec §14 host webhook contract"
+version.workspace = true
+readme = "README.md"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cleverhans"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+clap = { version = "4", features = ["derive"] }
+cleverhans = { workspace = true, features = ["anthropic", "ollama", "test-util"] }
+cleverhans-conformance = { workspace = true }
+cleverhans-core = { workspace = true }
+cleverhans-webhook = { workspace = true }
+cleverhans-ws = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "signal"] }
+toml = "0.8"
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "time"] }
+tokio-tungstenite = "0.24"
+futures-util = { workspace = true }
+
+[lints]
+workspace = true
