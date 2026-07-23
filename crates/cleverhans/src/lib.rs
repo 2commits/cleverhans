@@ -30,8 +30,8 @@
 //! - `test-util` — deterministic doubles ([`test_util`]) for offline tests
 
 pub use cleverhans_core::{
-    JsonMap, SPEC_VERSION, agent, async_trait, envelope, error, proposal, registry, schema, seams,
-    slots, spec_version_compatible, validation,
+    JsonMap, SPEC_VERSION, agent, async_trait, declarative, envelope, error, proposal, registry,
+    schema, seams, slots, spec_version_compatible, validation,
 };
 
 #[cfg(feature = "test-util")]
@@ -53,7 +53,7 @@ pub use cleverhans_llm_ollama as ollama;
 #[cfg(feature = "evals")]
 pub use cleverhans_evals as evals;
 
-#[cfg(any(feature = "anthropic", feature = "ollama"))]
+#[cfg(any(feature = "anthropic", feature = "ollama", feature = "test-util"))]
 pub mod llm;
 
 /// Everything an integration typically names, one glob away.

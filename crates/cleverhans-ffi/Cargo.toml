@@ -11,10 +11,9 @@ publish = false
 async-trait = { workspace = true }
 cleverhans-codegen = { workspace = true }
 cleverhans-conformance = { workspace = true }
+cleverhans = { workspace = true, features = ["anthropic", "ollama", "test-util"] }
 cleverhans-core = { workspace = true }
 cleverhans-ws-core = { workspace = true }
-cleverhans-llm-anthropic = { workspace = true }
-cleverhans-llm-ollama = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

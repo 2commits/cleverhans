@@ -21,7 +21,10 @@ use cleverhans_core::envelope::Context;
 use cleverhans_core::registry::{ParamSpec, Registry};
 use cleverhans_core::seams::{AuthzDecision, AuthzResolver, ContextParamResolver};
 use cleverhans_core::test_util::ScriptedLlm;
-use cleverhans_ws::{PrincipalExtractor, agent_router, agent_router_from_extension};
+use cleverhans_ws::{
+    AsyncPrincipalExtractor, PrincipalExtractor, agent_router, agent_router_async,
+    agent_router_from_extension,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 struct User {
@@ -144,4 +147,40 @@ async fn header_router_refuses_with_the_extractor_status() {
     let status = upgrade_status(serve(app).await, None).await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED.as_u16());
+}
+
+/// An awaiting extractor, as a session-store lookup or the standalone
+/// service's verify_session webhook would be.
+struct AsyncHeaderAuth;
+
+#[async_trait]
+impl AsyncPrincipalExtractor<User> for AsyncHeaderAuth {
+    async fn extract(&self, headers: &HeaderMap) -> Result<User, StatusCode> {
+        tokio::task::yield_now().await; // prove the await point is real
+        headers
+            .get("x-user")
+            .and_then(|value| value.to_str().ok())
+            .map(|name| User {
+                name: name.to_owned(),
+            })
+            .ok_or(StatusCode::SERVICE_UNAVAILABLE)
+    }
+}
+
+#[tokio::test]
+async fn async_router_upgrades_when_the_extractor_accepts() {
+    let app = agent_router_async("/agent", agent(), Arc::new(AsyncHeaderAuth));
+
+    let status = upgrade_status(serve(app).await, Some(("x-user", "alex"))).await;
+
+    assert_eq!(status, StatusCode::SWITCHING_PROTOCOLS.as_u16());
+}
+
+#[tokio::test]
+async fn async_router_refuses_with_the_extractor_status_before_upgrade() {
+    let app = agent_router_async("/agent", agent(), Arc::new(AsyncHeaderAuth));
+
+    let status = upgrade_status(serve(app).await, None).await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE.as_u16());
 }

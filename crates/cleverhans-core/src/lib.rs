@@ -14,10 +14,13 @@
 //! - [`validation`] — propose-time and confirm-time validation pipeline
 //! - [`seams`] — the traits an application implements to plug in
 //! - [`agent`] — the agent loop tying the above together
+//! - [`declarative`] — data-driven seam encodings (slots-as-config,
+//!   scripted model items) shared by fixtures, FFI hosts, and service config
 //! - [`test_util`] (feature `test-util`) — deterministic doubles for
 //!   integration tests without a live model
 
 pub mod agent;
+pub mod declarative;
 pub mod envelope;
 pub mod error;
 pub mod proposal;

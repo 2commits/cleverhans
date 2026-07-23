@@ -19,6 +19,7 @@ use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
 use cleverhans_core::agent::Agent;
+use cleverhans_core::async_trait;
 pub use cleverhans_ws_core::{run_session, to_json};
 
 /// Authenticates an upgrade request: maps HTTP headers (cookie, bearer
@@ -34,9 +35,31 @@ pub trait PrincipalExtractor<P>: Send + Sync {
     fn extract(&self, headers: &HeaderMap) -> Result<P, StatusCode>;
 }
 
+/// [`PrincipalExtractor`] for verifications that await — a session-store
+/// lookup, or the standalone service's `verify_session` webhook (spec
+/// §14.3). Verification completes *before* the upgrade is accepted, so a
+/// refused principal is an HTTP status, never a connected-then-dropped
+/// socket.
+#[async_trait]
+pub trait AsyncPrincipalExtractor<P>: Send + Sync {
+    /// Extracts the principal, or refuses the upgrade.
+    ///
+    /// # Errors
+    ///
+    /// A status (typically `401 UNAUTHORIZED`, or `503` for a failed
+    /// upstream verification) that rejects the request before any envelope
+    /// traffic is processed.
+    async fn extract(&self, headers: &HeaderMap) -> Result<P, StatusCode>;
+}
+
 struct WsState<P> {
     agent: Arc<Agent<P>>,
     principals: Arc<dyn PrincipalExtractor<P>>,
+}
+
+struct AsyncWsState<P> {
+    agent: Arc<Agent<P>>,
+    principals: Arc<dyn AsyncPrincipalExtractor<P>>,
 }
 
 /// A router serving the envelope stream at the given path (e.g. `/agent`).
@@ -95,6 +118,34 @@ async fn upgrade_handler<P: Send + Sync + 'static>(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let principal = match state.principals.extract(&headers) {
+        Ok(principal) => principal,
+        Err(status) => return status.into_response(),
+    };
+    upgrade
+        .on_upgrade(move |socket| serve_socket(socket, Arc::clone(&state.agent), principal))
+        .into_response()
+}
+
+/// A router serving the envelope stream with the principal produced by an
+/// [`AsyncPrincipalExtractor`] — the mounting style for verifications that
+/// leave the process (session-store reads, the §14.3 `verify_session`
+/// webhook of the standalone service topology).
+pub fn agent_router_async<P: Send + Sync + 'static>(
+    path: &str,
+    agent: Arc<Agent<P>>,
+    principals: Arc<dyn AsyncPrincipalExtractor<P>>,
+) -> Router {
+    Router::new()
+        .route(path, get(async_upgrade_handler::<P>))
+        .with_state(Arc::new(AsyncWsState { agent, principals }))
+}
+
+async fn async_upgrade_handler<P: Send + Sync + 'static>(
+    State(state): State<Arc<AsyncWsState<P>>>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let principal = match state.principals.extract(&headers).await {
         Ok(principal) => principal,
         Err(status) => return status.into_response(),
     };
