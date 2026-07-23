@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/execute.response.json",
+  "title": "execute 200 response (SPEC.md §14.6)",
+  "description": "Status mapping is normative in §14.6: 200/executed → proposal executed; 200/rejected → failed with reason; 5xx or malformed → failed (never retried once answered); timeout/network → bounded retry with the same idempotency_key, then failed with outcome-unknown reason.",
+  "type": "object",
+  "required": ["outcome"],
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": { "const": "executed" },
+        "result": {
+          "description": "Any JSON value; carried in ProposalStateChanged.result."
+        }
+      },
+      "required": ["outcome"]
+    },
+    {
+      "properties": {
+        "outcome": { "const": "rejected" },
+        "reason": { "type": "string" }
+      },
+      "required": ["outcome"]
+    }
+  ]
+}

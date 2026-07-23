@@ -1,0 +1,47 @@
+{
+  "name": "principal_echoed_verbatim",
+  "description": "§12.13: a structurally rich principal returned by verify_session is echoed deep-equal on every subsequent delivery — never constructed, merged, or mutated by the service.",
+  "spec": ["12.13", "14.3"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret" },
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "host": {
+    "verify_session": [ { "respond": { "status": 200, "body": { "principal": {
+      "sub": "u_1", "roles": ["editor", "admin"],
+      "claims": { "tenant": "acme", "exp": 1893456000 },
+      "sig": "0xDEADBEEF" } } } } ]
+  },
+  "steps": [
+    { "connect": { "headers": { "cookie": "sid=abc" } } },
+    { "expect_connect": { "status": 101 } },
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581", "view_type": "detail" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [ { "type": "action_proposal", "proposal_id": { "$bind": "P" } } ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [ { "type": "proposal_state_changed", "state": "executed" } ] }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session" },
+    { "endpoint": "authorize",
+      "body": { "principal": { "$exact": { "sub": "u_1", "roles": ["editor", "admin"],
+        "claims": { "tenant": "acme", "exp": 1893456000 }, "sig": "0xDEADBEEF" } } } },
+    { "endpoint": "dry_run",
+      "body": { "principal": { "$exact": { "sub": "u_1", "roles": ["editor", "admin"],
+        "claims": { "tenant": "acme", "exp": 1893456000 }, "sig": "0xDEADBEEF" } } } },
+    { "endpoint": "authorize",
+      "body": { "principal": { "$exact": { "sub": "u_1", "roles": ["editor", "admin"],
+        "claims": { "tenant": "acme", "exp": 1893456000 }, "sig": "0xDEADBEEF" } } } },
+    { "endpoint": "dry_run",
+      "body": { "principal": { "$exact": { "sub": "u_1", "roles": ["editor", "admin"],
+        "claims": { "tenant": "acme", "exp": 1893456000 }, "sig": "0xDEADBEEF" } } } },
+    { "endpoint": "execute",
+      "body": { "principal": { "$exact": { "sub": "u_1", "roles": ["editor", "admin"],
+        "claims": { "tenant": "acme", "exp": 1893456000 }, "sig": "0xDEADBEEF" } } } }
+  ]
+}

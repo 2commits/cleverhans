@@ -1,0 +1,61 @@
+{
+  "name": "execute_request_shape",
+  "description": "The wire-shape anchor for the §14 contract: a full happy path asserts every delivery the host sees — verify_session at establishment, authorize + dry_run at propose time, authorize + dry_run again at confirm time, then exactly one execute whose body carries the exact §14.6 key set.",
+  "spec": ["14.2", "14.3", "14.4", "14.5", "14.6", "12.9"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret" },
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "host": {
+    "verify_session": [ { "respond": { "status": 200, "body": { "principal": { "user_id": "u_1" } } } } ]
+  },
+  "steps": [
+    { "connect": { "headers": { "authorization": "Bearer user-token" } } },
+    { "expect_connect": { "status": 101 } },
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581", "view_type": "detail" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal", "proposal_id": { "$bind": "P" },
+        "action_id": "transaction.coBuyer.remove" }
+    ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" },
+        "state": "executed", "result": { "$exact": { "removed": true } } }
+    ] }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session",
+      "headers": { "authorization": "Bearer vector-secret", "x-cleverhans-webhook-version": "1" },
+      "body": { "webhook_version": 1, "session_id": { "$bind": "S" },
+                "headers": { "authorization": "Bearer user-token" } } },
+    { "endpoint": "authorize",
+      "body": { "kind": "authorize", "session_id": { "$ref": "S" },
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "$exact": { "transactionId": "tx_581" } },
+                "principal": { "$exact": { "user_id": "u_1" } } } },
+    { "endpoint": "dry_run",
+      "body": { "kind": "dry_run", "session_id": { "$ref": "S" },
+                "action_id": "transaction.coBuyer.remove" } },
+    { "endpoint": "authorize",
+      "body": { "kind": "authorize", "session_id": { "$ref": "S" } } },
+    { "endpoint": "dry_run",
+      "body": { "kind": "dry_run", "session_id": { "$ref": "S" } } },
+    { "endpoint": "execute",
+      "headers": { "authorization": "Bearer vector-secret", "x-cleverhans-webhook-version": "1",
+                   "x-cleverhans-delivery": { "$bind": "D" } },
+      "body": { "$keys": ["webhook_version", "kind", "session_id", "action_id",
+                          "params", "principal", "idempotency_key", "attempt"],
+                "kind": "execute", "webhook_version": 1,
+                "session_id": { "$ref": "S" },
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "$exact": { "transactionId": "tx_581" } },
+                "principal": { "$exact": { "user_id": "u_1" } },
+                "attempt": 1 } }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "verify_session_401_rejects_upgrade",
+  "description": "§14.3: a 401 from verify_session refuses stream establishment with the same status — no session, no envelope traffic, no further deliveries.",
+  "spec": ["14.3", "6.1"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret" },
+  "llm": [],
+  "host": {
+    "verify_session": [ { "respond": { "status": 401, "body": { "reason": "expired session" } } } ]
+  },
+  "steps": [
+    { "connect": { "headers": { "cookie": "sid=stale" } } },
+    { "expect_connect": { "status": 401 } }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session",
+      "body": { "headers": { "cookie": "sid=stale" } } }
+  ]
+}

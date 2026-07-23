@@ -1,0 +1,20 @@
+{
+  "name": "execute_executed",
+  "description": "§14.6: an execute call for a permitted, existing target returns 200 with an executed outcome.",
+  "spec": ["14.6"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "requests": [
+    { "endpoint": "verify_session", "auth": "valid",
+      "body": { "webhook_version": 1, "session_id": "s_hostcheck_4",
+                "headers": { "authorization": "Bearer host-check-user" } },
+      "expect": { "status": 200, "body": { "principal": { "$bind": "PRIN" } } } },
+    { "endpoint": "execute", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "execute", "session_id": "s_hostcheck_4",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "$ref": "PRIN" },
+                "idempotency_key": "ik_hostcheck_4a", "attempt": 1 },
+      "expect": { "status": 200, "body": { "outcome": "executed" } } }
+  ]
+}

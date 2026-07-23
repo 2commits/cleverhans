@@ -16,9 +16,11 @@ files.
 ## Layout
 
 ```
-fixtures/   registry fixtures: a spec §4 registry document + seam scripts
-cases/      agent- and binding-layer vectors (server-side behavior)
-client/     client-layer vectors (frontend session semantics)
+fixtures/          registry fixtures: a spec §4 registry document + seam scripts
+cases/             agent- and binding-layer vectors (server-side behavior)
+client/            client-layer vectors (frontend session semantics)
+webhook/service/   webhook-service vectors: a §10.2 agent service against a scripted host
+webhook/host/      webhook-host vectors: request/response pairs a §14 host must satisfy
 ```
 
 A vector's `name` must equal its file stem.
@@ -79,6 +81,50 @@ loop (init-first ordering, malformed-frame handling — spec §6.1, §11).
 `{"raw": "<verbatim>"}`. `expect` matches the flat outbound event list;
 `expect_close: true` asserts the session ends with no further events.
 
+## Webhook-service vectors (`webhook/service/`)
+
+Test an agent service implementation of the §14 host webhook contract (the
+`cleverhans serve` reference binary, or a third-party reimplementation). The
+format extends the agent-layer case format:
+
+- `service_config` — deployment config the runner applies to the service
+  under test: `{"secret": "<service-secret>", "forward_headers": [..]?}`.
+- `host` — per-endpoint response scripts, keyed `verify_session` /
+  `authorize` / `dry_run` / `execute`. Each is an array indexed by call
+  count (or `{"sequence": [...], "then": <entry>}`), entries:
+  `{"respond": {"status": <int>, "body": <json>}}` or `{"timeout": true}`.
+  An **unscripted endpoint defaults to fixture-derived behavior**: the
+  runner's mock host serves the fixture's `scripts` block (`handler`
+  `{"return": v}` → `{"outcome": "executed", "result": v}`, `{"fail": m}` →
+  `{"outcome": "rejected", "reason": m}`; `dry_run` likewise), `authorize`
+  defaults to allow, `verify_session` to
+  `200 {"principal": {"user_id": "vector-user"}}`.
+- `steps` — as the agent layer, plus stream establishment:
+  `{"connect": {"headers": {...}?}}` attempts establishment with those
+  client headers; `{"expect_connect": {"status": <int>}}` asserts the
+  result (101 = established; otherwise the §14.3 refusal status).
+- `expect_deliveries` — the exact ordered list of webhook calls the host
+  received. Each entry: `{"endpoint", "headers"?, "body"?}` matched with
+  the standard semantics (subset objects, directives). Header keys are
+  lowercased. This is how §12.12/§12.13/§12.14 are asserted on the wire.
+
+## Webhook-host vectors (`webhook/host/`)
+
+Test a host implementation of the §14 endpoints — the third-party
+conformance story for any backend language (replayed by
+`cleverhans host-check`). The host is seeded with the semantics of the
+named fixture. `requests` is an ordered list:
+
+- `{"endpoint", "auth": "valid" | "invalid" | "none", "webhook_version"?,
+   "body", "expect": {"status", "body"?}}`
+- `auth` selects the `Authorization` bearer: the configured secret, a wrong
+  value, or absent. `webhook_version` overrides the
+  `X-CleverHans-Webhook-Version` header (default 1).
+- `expect.status` is an integer or `{"$in": [..]}`; `expect.body` uses the
+  standard matching semantics. `$bind`/`$ref` carry values across requests
+  (e.g. the idempotent-replay vector binds the first execute response body
+  and requires the replay to `$ref` it exactly).
+
 ## Client vectors (`client/`)
 
 Drive a client session implementation over an in-memory transport. `steps`:
@@ -112,8 +158,13 @@ Drive a client session implementation over an in-memory transport. `steps`:
      matching where an invariant demands it, e.g. §7.1's "no unknown
      params").
    - `{"$keys": [..]}` asserts an object's exact key set without pinning
-     values.
+     values. Also legal *beside* sibling field matchers inside a subset
+     object, pinning the key set while the siblings match values.
    - `{"$absent": true}` requires the field to be missing or `null`.
+   - `{"$differs": "NAME"}` matches any value that is NOT equal to the
+     previously bound value (webhook layers: retry delivery IDs).
+   - `{"$in": [..]}` matches any listed value (webhook-host layer: status
+     sets like `[401, 403]`).
 7. **Never assert implementation-authored prose** (decline messages,
    summaries) unless the text came verbatim from the vector's own `llm`
    script — matchers for conversational declines assert only

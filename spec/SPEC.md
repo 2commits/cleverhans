@@ -1,8 +1,12 @@
 # CleverHans Protocol Specification
 
-**Version:** 0.1.1-draft
+**Version:** 0.1.2-draft
 **Status:** Draft
 **Tracking:** ED-536
+
+*Changes in 0.1.2: standalone service topology (§10.2), host webhook contract
+(§14) with its own independent version integer, security invariants 11–14
+(§12). All additive; the wire version remains `0.1`.*
 
 *Changes in 0.1.1: normative streaming semantics for `ChatMessage` (§6.3),
 context-summary guidance (§5), slot builders (§9.7), agent-mandate seam
@@ -447,6 +451,8 @@ than 20 records", "read-only actions only".
 
 ## 10. Deployment topology and auth chain
 
+### 10.1 In-backend (reference topology)
+
 Reference topology: the agent runs **in-backend** — a crate/module inside the app
 backend process, not a separate service. Lowest latency, shares the request's
 authorization context natively, no cross-service auth surface.
@@ -463,6 +469,34 @@ agent → backend            proposals only; execution happens on confirm,
 
 The agent has no standing write access to anything. The agent feature MUST be cleanly
 optional (feature flag, no degraded UI when off).
+
+### 10.2 Standalone service topology
+
+The agent MAY run as a **separate process** — a service the app deploys next to its
+backend (the reference binary is `cleverhans serve`). Everything the framework owns
+stays inside the service: the envelope and state machine, the validation pipeline, the
+agent loop, context-param filling, and slot building. Everything the app owns — handlers
+(§9.2), dry-run (§9.2), authorization (§9.3), and transport authentication — is reached
+over HTTP webhooks defined by the host webhook contract (§14).
+
+Auth chain:
+
+```
+user ↔ frontend            app's normal auth (unchanged)
+frontend ↔ service         the envelope stream; the upgrade's credentials are
+                           verified against the host's verify_session endpoint (§14.3) —
+                           the framework still never constructs a principal
+service ↔ LLM              LlmProvider; provider key held by the service
+service → host             webhook calls (§14), authenticated service-to-service;
+                           they carry the principal AS DATA, never user credentials
+host → anything            execution under the host's own handler and authorization
+                           path, exactly as §10.1
+```
+
+The service topology moves the §9 seam boundary onto the network; it does **not** move
+the trust boundary of the propose-only model. The host remains the sole execution
+authority: the service can only deliver validated, confirmed proposals to endpoints the
+host implements, authenticates, and executes under its own rules.
 
 ## 11. Transport bindings
 
@@ -517,6 +551,27 @@ in-app agent it is overhead.
 10. The rendered UI vocabulary MUST be closed: registered block types, typed slots,
     schema-validated before render.
 
+Invariants 11–14 apply to the standalone service topology (§10.2):
+
+11. **Webhook endpoints are execution surface.** A host MUST authenticate every webhook
+    call as coming from its agent service (bearer secret at minimum; mTLS where
+    available) and MUST NOT expose these endpoints to end users or the public internet
+    unauthenticated.
+12. **No standing user credentials in the service.** The service forwards the client's
+    transport credentials to `verify_session` exactly once, at session establishment,
+    and MUST NOT retain or re-forward them. After establishment, webhook calls carry
+    the principal *as data*, never a credential. (Extends invariant 1: the service's
+    only credentials are the LLM provider key and the host service secret.)
+13. **The principal is opaque and echoed verbatim.** The service MUST send the
+    `principal` value returned by `verify_session` byte-identical on every webhook call
+    for that session and MUST NOT construct, merge, or mutate it. A host that places
+    the service outside its trust boundary SHOULD make the principal a verifiable token
+    (signed claims or an opaque session reference) and re-verify it per call — the wire
+    shape is identical either way; that is the point of opacity.
+14. **Execute is idempotent.** Hosts MUST implement the execute endpoint idempotently,
+    keyed on the request's `idempotency_key` (§14.6). This is what makes bounded retry
+    after delivery failure safe.
+
 ## 13. Versioning
 
 - **Spec:** semver on this document; `Init.spec_version` lets endpoints negotiate or
@@ -525,6 +580,153 @@ in-app agent it is overhead.
   and new message types; existing field semantics never change.
 - **Registry:** evolves freely and independently of the envelope; adding an action is
   an app-side edit plus codegen, with no protocol change. This decoupling is the point.
+- **Webhook contract (§14):** versioned independently of this document, as an integer
+  carried in `X-CleverHans-Webhook-Version`. Like the gRPC and WS bindings, the webhook
+  contract is a binding-layer artifact: it evolves additively (new optional fields, new
+  optional endpoints) without touching envelope or registry versioning.
+
+## 14. Host webhook contract (service topology)
+
+The normative wire contract between an agent service (§10.2) and the host application.
+A host in any language becomes serve-compatible by implementing these endpoints;
+conformance vectors live in `spec/vectors/webhook/` and machine-readable body schemas
+(non-normative implementer aids) in `spec/webhook/schemas/`.
+
+### 14.1 Model
+
+Four HTTP POST endpoints, host-implemented, service-called. The host never calls the
+service. All bodies are JSON (`application/json`). Endpoint paths are deployment
+configuration.
+
+| Endpoint | Required | Seam |
+|---|---|---|
+| `verify_session` | yes | transport authentication (§10.2) |
+| `authorize` | yes | §9.3 — a host with no per-action permissions returns `{"decision":"allow"}` unconditionally; a trivial handler is cheaper than an optional endpoint in the contract |
+| `dry_run` | iff any registered action has `mutates: true` | §9.2 dry-run |
+| `execute` | yes | §9.2 handler |
+
+Slot building and context-param resolution do **not** cross the wire: context params are
+filled by the service from the registry's `context_params` mapping (§4.1), and slots come
+from declarative slot configuration in the service (§9.7 semantics, app-authored). A
+`build_slots` webhook is a reserved future additive endpoint.
+
+### 14.2 Headers
+
+| Header | Semantics |
+|---|---|
+| `Authorization: Bearer <service-secret>` | Service-to-service credential from deployment config. The host MUST verify it on all endpoints (invariant 11). |
+| `X-CleverHans-Webhook-Version: 1` | Contract version. The host MUST reject an unknown version with `400` and body `{"error": "unsupported_webhook_version", "supported": [1]}`; the service MUST treat that as fatal misconfiguration — fail closed, log, do not degrade. |
+| `X-CleverHans-Delivery: <uuid>` | Unique per HTTP attempt (changes on retry). Log correlation only; NOT the idempotency key. |
+| `Content-Type: application/json` | Both directions. |
+
+The user's credentials appear only in the `verify_session` body, never in the headers of
+the other calls, and never after session establishment (invariant 12). Payload HMAC
+signing (`X-CleverHans-Signature`) is a reserved future additive header.
+
+### 14.3 `verify_session`
+
+Called once per envelope-stream establishment (e.g. WebSocket upgrade), before any
+envelope traffic.
+
+Request:
+
+```
+{ "webhook_version": 1,
+  "session_id": "s_9f2…",
+  "headers": { "authorization": "Bearer eyJ…", "cookie": "sid=…" } }
+```
+
+`headers` contains only the configured forward-allowlist (default: `authorization`,
+`cookie`), keys lowercased.
+
+| Host response | Service behavior |
+|---|---|
+| `200 {"principal": <any JSON>}` | Stream established. `principal` is stored verbatim for the session and echoed on every subsequent call (invariant 13). Whether it is plain claims or a signed/reference token the host re-verifies per call is the host's choice. |
+| `401` / `403` (optional body `{"reason": "…"}`) | Stream refused with the same status. |
+| Any other status, malformed body, timeout, network error | Stream refused with `503`. Fail closed. |
+
+### 14.4 `authorize`
+
+Request:
+
+```
+{ "webhook_version": 1,
+  "kind": "authorize",
+  "session_id": "s_9f2…",
+  "action_id": "transaction.coBuyer.remove",
+  "params": { "transactionId": "tx_581" },
+  "principal": <verbatim echo> }
+```
+
+`params` are the fully validated, context-filled params — exactly what §9.3 receives
+in-process. Called at propose time and again at confirm time (§12.9); the request does
+not distinguish the phases in v1 (a `phase` field is reserved additive).
+
+Response: `200 {"decision": "allow"}` or `200 {"decision": "deny", "reason": "…"}`.
+Deny is a *successful* delivery, hence `200` — HTTP status is reserved for
+transport/auth/protocol failure.
+
+| Failure | At propose time | At confirm time |
+|---|---|---|
+| Non-200, timeout, network error, malformed body | Treated as deny: candidate `invalid`, unrendered | Proposal `expired` |
+
+Fail closed, always.
+
+### 14.5 `dry_run`
+
+Request: same common shape with `"kind": "dry_run"`. Called during propose-time
+validation and again during confirm-time revalidation (§7.3 step 1).
+
+Response: `200 {"outcome": "preview", "preview": <DryRunPreview §6.4>}` (an empty
+object is a valid preview; all fields default) or
+`200 {"outcome": "rejected", "reason": "…"}`.
+
+| Host behavior | At propose time | At confirm time |
+|---|---|---|
+| `{"outcome": "rejected"}` | Proposal `invalid` (unrendered; reason available to the model) | `expired` |
+| 5xx / timeout / network error / malformed body | `invalid` | `expired` |
+| 401/403/404/400-version (service misconfiguration) | `invalid`; service logs at error level | `expired` |
+
+Cross-reference §12.7: no permission-correct preview → no rendered mutating proposal,
+and never execution.
+
+### 14.6 `execute`
+
+Fires only from the confirm path, after confirm-time revalidation.
+
+Request: common shape with `"kind": "execute"`, plus:
+
+- `"idempotency_key"`: a UUID minted once per confirmed execution, **stable across
+  retry attempts** of that execution.
+- `"attempt"`: integer, 1-based, increments per retry.
+
+| Host response | Proposal state | `ProposalStateChanged` |
+|---|---|---|
+| `200 {"outcome": "executed", "result": <json>}` | `executed` | `result` carries the JSON |
+| `200 {"outcome": "rejected", "reason": "…"}` | `failed` | `reason` = host reason |
+| 5xx / malformed 200 body | `failed` — an answered call is never retried | generic reason |
+| Timeout / connection error | service MAY retry up to a bounded attempt count with backoff — safe only because of invariant 14 — then `failed` with reason `"execution outcome unknown"` | see caveat |
+| 401/403/404/400-version | `failed`; fatal-misconfiguration log | generic reason |
+
+**A `failed` state resulting from delivery failure does NOT assert non-execution; it
+asserts the outcome is unknown to the agent.** The host owns the source of truth for
+whether the mutation happened; the idempotency requirement (invariant 14) is what lets
+a retry resolve the ambiguity rather than double-execute. Re-delivery of the same
+`idempotency_key` MUST return the outcome of the first execution (or perform it if it
+never happened), never execute twice.
+
+### 14.7 Timeouts
+
+Defaults, deployment-configurable: `verify_session` 5 s, `authorize` 5 s, `dry_run`
+10 s, `execute` 30 s. Every timeout maps per the tables above; nothing times out into
+an open-failed state, and only `execute` is ever retried.
+
+### 14.8 Transport security
+
+Service-to-host traffic runs over loopback or TLS. The reference implementation refuses
+to start with a non-loopback plaintext upstream URL or without a service secret, absent
+explicit `danger_`-prefixed configuration overrides. mTLS is recommended where the
+deployment supports it (deployment note, not contract).
 
 ## Appendix A — worked example
 
