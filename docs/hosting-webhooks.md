@@ -17,6 +17,18 @@ your app (Go, Java, C#, PHP, …)     ← four endpoints, your normal auth path
 
 ## 1. Implement the four endpoints
 
+Think of these as a new **interface tier** over your existing services, not
+new endpoints to duplicate: like a GraphQL resolver or gRPC handler beside
+your REST controllers, each handler is a thin envelope delegating to the
+same domain functions your current API calls. Business logic stays
+single-sourced. The one genuinely new capability the tier asks of you is
+`dry_run` — a permission-correct "what would this do?" your API probably
+doesn't have yet, and the core of the propose-only safety model (§12.7).
+Four handlers total is the floor: the request body always carries
+`action_id`, so one execute route and one dry-run route dispatching
+internally is fully conformant (per-action routes are optional ergonomics
+via the config's `{action}` wildcard).
+
 All POST, all JSON. Verify the `Authorization: Bearer <secret>` on every one
 (spec §12.11), and reject an unknown `X-CleverHans-Webhook-Version` with
 `400 {"error": "unsupported_webhook_version", "supported": [1]}`.
