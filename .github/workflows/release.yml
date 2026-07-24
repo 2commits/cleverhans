@@ -158,6 +158,9 @@ jobs:
         working-directory: typescript
       - uses: actions/download-artifact@v8
         with:
+          # Only the napi bindings — the run also carries service-* binaries
+          # and wheels-* artifacts for the other channels.
+          pattern: bindings-*
           path: typescript/cleverhans-node/artifacts
           merge-multiple: true
       - name: Stage platform packages
