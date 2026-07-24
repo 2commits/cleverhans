@@ -93,6 +93,11 @@ enum Command {
         /// The bearer secret the mock host requires.
         #[arg(long, default_value = "dev-secret")]
         secret: String,
+        /// Serve a custom conformance fixture (registry + seam scripts,
+        /// `spec/vectors/README.md` format) instead of the embedded
+        /// co-buyer demo — e.g. your own registry with scripted handlers.
+        #[arg(long)]
+        fixture: Option<PathBuf>,
     },
 }
 
@@ -115,7 +120,11 @@ async fn main() -> anyhow::Result<()> {
             bind,
         } => serve(&registry, &config, bind).await,
         Command::HostCheck { base_url, secret } => host_check(&base_url, &secret).await,
-        Command::MockHost { bind, secret } => mock_host(&bind, &secret).await,
+        Command::MockHost {
+            bind,
+            secret,
+            fixture,
+        } => mock_host(&bind, &secret, fixture.as_deref()).await,
     }
 }
 
@@ -170,8 +179,26 @@ async fn host_check(base_url: &str, secret: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn mock_host(bind: &str, secret: &str) -> anyhow::Result<()> {
-    let fixture: Fixture = serde_json::from_str(FIXTURE).context("parse embedded fixture")?;
+async fn mock_host(
+    bind: &str,
+    secret: &str,
+    fixture: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
+    let (fixture, source): (Fixture, String) = match fixture {
+        Some(path) => {
+            let json = std::fs::read_to_string(path)
+                .with_context(|| format!("read fixture {}", path.display()))?;
+            (
+                serde_json::from_str(&json)
+                    .with_context(|| format!("parse fixture {}", path.display()))?,
+                path.display().to_string(),
+            )
+        }
+        None => (
+            serde_json::from_str(FIXTURE).context("parse embedded fixture")?,
+            "embedded co-buyer".to_owned(),
+        ),
+    };
     let host = MockHost::spawn_at(
         fixture,
         AuthzScript::default(),
@@ -183,6 +210,7 @@ async fn mock_host(bind: &str, secret: &str) -> anyhow::Result<()> {
     tracing::info!(
         addr = %host.addr,
         secret,
+        fixture = source.as_str(),
         "mock host up — endpoints: /cleverhans/{{verify_session,authorize,dry_run,execute}}"
     );
     tokio::signal::ctrl_c().await?;
