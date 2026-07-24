@@ -47,7 +47,9 @@ happened), never execute twice. Store the key with the outcome in the same
 transaction as the mutation.
 
 Machine-readable request/response schemas (codegen-friendly, JSON Schema
-2020-12) live in [`spec/webhook/schemas/`](../spec/webhook/schemas/).
+2020-12) live in [`spec/webhook/schemas/`](../spec/webhook/schemas/), and a
+complete dependency-free reference host — CI-proven against `host-check`,
+signatures included — in [`examples/node-host/`](examples/node-host/).
 
 ### Optional: verify payload signatures
 
