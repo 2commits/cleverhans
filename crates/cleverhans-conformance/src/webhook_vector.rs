@@ -17,13 +17,15 @@ use cleverhans_core::envelope::ClientEvent;
 use cleverhans_core::registry::RegistryBuilder;
 use cleverhans_core::seams::{DryRunHandler, SlotBuilder};
 use cleverhans_webhook::client::{HostClient, HostClientConfig, RetryPolicy, Route, Timeouts};
-use cleverhans_webhook::seams::{WebhookAuthz, WebhookDryRun, WebhookHandler, WebhookVerifier};
+use cleverhans_webhook::seams::{
+    WebhookAuthz, WebhookDryRun, WebhookHandler, WebhookSlots, WebhookVerifier,
+};
 
 use crate::fixture::{ExecutionExpectation, Fixture, ScriptedLlm, Step, Vector};
 use crate::matcher::{Bindings, match_events, match_value, substitute};
 use crate::mock_host::{
-    AUTHORIZE_PATH, DRY_RUN_PATH, EXECUTE_PATH, HostScript, MockHost, VERIFY_SESSION_PATH,
-    default_principal,
+    AUTHORIZE_PATH, BUILD_SLOTS_PATH, DRY_RUN_PATH, EXECUTE_PATH, HostScript, MockHost,
+    VERIFY_SESSION_PATH, default_principal,
 };
 
 /// Service deployment knobs a vector may pin.
@@ -39,6 +41,10 @@ pub struct ServiceConfig {
     /// and the mock host requires a valid signature.
     #[serde(default)]
     pub signing_key: Option<String>,
+    /// §14.9: when set, every action's slots come from the build_slots
+    /// endpoint instead of local declarative configuration.
+    #[serde(default)]
+    pub build_slots: bool,
 }
 
 /// One `webhook/service/` step.
@@ -101,6 +107,7 @@ fn short_timeouts() -> Timeouts {
         authorize: Duration::from_millis(500),
         dry_run: Duration::from_millis(500),
         execute: Duration::from_millis(500),
+        build_slots: Duration::from_millis(500),
     }
 }
 
@@ -116,6 +123,7 @@ pub fn build_webhook_agent(
     host: &MockHost,
     secret: &str,
     signing_key: Option<&str>,
+    build_slots: bool,
 ) -> (Arc<Agent<Value>>, Arc<HostClient>) {
     let client = Arc::new(
         HostClient::new(HostClientConfig {
@@ -145,19 +153,35 @@ pub fn build_webhook_agent(
                 Route::from_str(&format!("POST {DRY_RUN_PATH}")).expect("route"),
             )) as Arc<dyn DryRunHandler<Value>>
         });
-        builder = builder.attach(
+        let handler = Arc::new(WebhookHandler::new(
+            Arc::clone(&client),
             def.id.clone(),
-            Arc::new(WebhookHandler::new(
+            Route::from_str(&format!("POST {EXECUTE_PATH}")).expect("route"),
+        )) as Arc<dyn cleverhans_core::seams::ActionHandler<Value>>;
+        builder = if build_slots {
+            let slots = WebhookSlots::new(
                 Arc::clone(&client),
                 def.id.clone(),
-                Route::from_str(&format!("POST {EXECUTE_PATH}")).expect("route"),
-            )),
-            dry_run,
-            script
-                .slots
-                .clone()
-                .map(|slots| Arc::new(DeclarativeSlots(slots)) as Arc<dyn SlotBuilder>),
-        );
+                Route::from_str(&format!("POST {BUILD_SLOTS_PATH}")).expect("route"),
+            );
+            builder.bind(def.id.clone(), move |binding| {
+                let binding = binding.handler(handler).async_slots(slots);
+                match dry_run {
+                    Some(dry_run) => binding.dry_run(dry_run),
+                    None => binding,
+                }
+            })
+        } else {
+            builder.attach(
+                def.id.clone(),
+                handler,
+                dry_run,
+                script
+                    .slots
+                    .clone()
+                    .map(|slots| Arc::new(DeclarativeSlots(slots)) as Arc<dyn SlotBuilder>),
+            )
+        };
     }
     let registry = builder.build().expect("fixture registry is valid");
     let agent = Agent::new(
@@ -196,7 +220,7 @@ pub async fn run_agent_vector_via_webhooks(
         SECRET,
     )
     .await;
-    let (agent, _client) = build_webhook_agent(fixture, &vector.llm, &host, SECRET, None);
+    let (agent, _client) = build_webhook_agent(fixture, &vector.llm, &host, SECRET, None, false);
     let principal =
         cleverhans_webhook::seams::session_principal("s_conformance", default_principal());
     let mut session = Session::new(principal);
@@ -258,6 +282,7 @@ pub async fn run_service_vector(fixture: &Fixture, vector: &ServiceVector) -> Re
         &host,
         &vector.service_config.secret,
         vector.service_config.signing_key.as_deref(),
+        vector.service_config.build_slots,
     );
     let verifier = WebhookVerifier::new(
         client,

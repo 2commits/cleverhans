@@ -58,3 +58,8 @@ dry_run = "POST /internal/cleverhans/{action}/dry-run"
 # title = { const = "Archive record" }
 # detail = { param = "reason" }
 # summary = { preview = "summary" }
+
+# Cards needing computed text can use the optional §14.9 endpoint instead
+# (wins over a slots table; failures fail closed — no card renders):
+# [actions."record.archive"]
+# build_slots = "POST /internal/cleverhans/record.archive/slots"

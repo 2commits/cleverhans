@@ -39,6 +39,7 @@ pub async fn host(bind: &str, secret: String) -> anyhow::Result<()> {
         .route("/cleverhans/authorize", post(authorize))
         .route("/cleverhans/dry_run", post(dry_run))
         .route("/cleverhans/execute", post(execute))
+        .route("/cleverhans/build_slots", post(build_slots))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(
@@ -125,6 +126,35 @@ async fn authorize(
     }
     // Everyone may do everything — dogfood host, not an auth reference.
     axum::Json(json!({"decision": "allow"})).into_response()
+}
+
+/// §14.9: delegates to the registry's real slot builders — the same
+/// dynamic card phrasing the in-process demo renders (e.g. rename's
+/// "New title: …"), now host-authored over the wire.
+async fn build_slots(
+    State(state): State<Arc<HostState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response {
+    if let Err(refusal) = check_headers(&state, &headers) {
+        return *refusal;
+    }
+    let (action_id, params, _user) = match parts(&body) {
+        Ok(parts) => parts,
+        Err(refusal) => return *refusal,
+    };
+    let Some(registration) = state.registry.action(action_id) else {
+        return unknown_action(action_id);
+    };
+    let Some(builder) = &registration.slot_builder else {
+        return unknown_action(action_id);
+    };
+    let preview: Option<DryRunPreview> = body
+        .get("preview")
+        .filter(|value| !value.is_null())
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let slots = builder.build(&params, preview.as_ref());
+    axum::Json(json!({ "slots": slots })).into_response()
 }
 
 async fn dry_run(

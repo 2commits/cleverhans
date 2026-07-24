@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/build_slots.response.json",
+  "title": "build_slots 200 response (SPEC.md §14.9)",
+  "description": "No outcome envelope — slot building is presentation, not a gate. Any non-200, timeout, or malformed body fails closed (propose: invalid; confirm: expired). Returned slots MUST pass the action's block slot schema (§7.1 step 4).",
+  "type": "object",
+  "required": ["slots"],
+  "properties": {
+    "slots": {
+      "type": "object",
+      "description": "Slot name → value for the action's block type."
+    }
+  }
+}

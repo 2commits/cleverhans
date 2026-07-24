@@ -8,8 +8,8 @@ use reqwest::StatusCode;
 use serde::Serialize;
 
 use crate::wire::{
-    AuthorizeResponse, DryRunResponse, ExecuteRequest, ExecuteResponse, SeamRequest,
-    VerifySessionRequest, VerifySessionResponse, WEBHOOK_VERSION,
+    AuthorizeResponse, BuildSlotsRequest, BuildSlotsResponse, DryRunResponse, ExecuteRequest,
+    ExecuteResponse, SeamRequest, VerifySessionRequest, VerifySessionResponse, WEBHOOK_VERSION,
 };
 
 /// One host endpoint as `"METHOD /path"` deployment configuration.
@@ -57,6 +57,8 @@ pub struct Timeouts {
     pub dry_run: Duration,
     /// `execute` (default 30 s).
     pub execute: Duration,
+    /// `build_slots` (default 10 s).
+    pub build_slots: Duration,
 }
 
 impl Default for Timeouts {
@@ -66,6 +68,7 @@ impl Default for Timeouts {
             authorize: Duration::from_secs(5),
             dry_run: Duration::from_secs(10),
             execute: Duration::from_secs(30),
+            build_slots: Duration::from_secs(10),
         }
     }
 }
@@ -335,6 +338,21 @@ impl HostClient {
         request: &SeamRequest,
     ) -> Result<DryRunResponse, DeliveryError> {
         self.deliver_json(route, self.timeouts.dry_run, request)
+            .await
+    }
+
+    /// Delivers a `build_slots` call (§14.9).
+    ///
+    /// # Errors
+    ///
+    /// Any [`DeliveryError`]; callers MUST fail closed (§14.9) — never
+    /// retried.
+    pub async fn build_slots(
+        &self,
+        route: &Route,
+        request: &BuildSlotsRequest,
+    ) -> Result<BuildSlotsResponse, DeliveryError> {
+        self.deliver_json(route, self.timeouts.build_slots, request)
             .await
     }
 

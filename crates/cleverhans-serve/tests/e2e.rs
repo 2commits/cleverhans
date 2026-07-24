@@ -232,6 +232,73 @@ async fn signed_deliveries_pass_a_host_that_requires_signatures() {
 }
 
 #[tokio::test]
+async fn build_slots_route_lets_the_host_author_the_card() {
+    // MockHost's build_slots evaluates the fixture's slot script server-side
+    // (title const + detail from the dry-run summary), so a host-authored
+    // card proves the §14.9 path end to end.
+    let host = MockHost::spawn(fixture(), AuthzScript::default(), HostScript::new(), SECRET).await;
+    let toml = config_toml(&host.base_url()).replace(
+        "[actions.\"transaction.coBuyer.remove\".slots]\ntitle = { const = \"Remove co-buyer\" }\ndetail = { preview = \"summary\" }",
+        "[actions.\"transaction.coBuyer.remove\"]\nexecute = \"POST /cleverhans/execute\"\ndry_run = \"POST /cleverhans/dry_run\"\nbuild_slots = \"POST /cleverhans/build_slots\"",
+    );
+    unsafe { std::env::set_var("E2E_SECRET", SECRET) };
+    let schema = load_schema(&registry_json()).expect("schema");
+    let config = Config::from_toml(&toml).expect("config");
+    let resolved = config.resolve(&schema).expect("resolve");
+    assert!(
+        resolved.actions["transaction.coBuyer.remove"]
+            .build_slots
+            .is_some(),
+        "toml rewrite must have produced a build_slots route"
+    );
+    let llm = cleverhans::llm::build_llm(config.llm.resolve().expect("llm"));
+    let app = build_app(&resolved, &schema, llm).expect("build app");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/agent"))
+        .await
+        .expect("upgrade accepted");
+    ws.send(Message::Text(
+        json!({"type": "init", "spec_version": "0.1.0-draft",
+               "context": {"route": "/transactions/tx_581",
+                            "selected_record_id": "tx_581", "view_type": "detail"}})
+        .to_string(),
+    ))
+    .await
+    .expect("send init");
+    ws.send(Message::Text(
+        json!({"type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1"})
+            .to_string(),
+    ))
+    .await
+    .expect("send message");
+
+    let proposal = next_event(&mut ws).await;
+    assert_eq!(proposal["type"], "action_proposal", "got {proposal}");
+    // Host-authored: the fixture slot script sources detail from the
+    // dry-run summary — content the declarative service config never held.
+    assert_eq!(proposal["slots"]["title"], "Remove co-buyer");
+    assert_eq!(
+        proposal["slots"]["detail"],
+        "Remove co-buyer Jane Doe from TX-581"
+    );
+
+    let deliveries = host.deliveries.lock().expect("deliveries");
+    let build = deliveries
+        .iter()
+        .find(|delivery| delivery.endpoint == "build_slots")
+        .expect("a build_slots delivery");
+    assert_eq!(build.body["kind"], "build_slots");
+    assert_eq!(build.body["preview"]["affected_count"], 1);
+}
+
+#[tokio::test]
 async fn refused_verification_refuses_the_upgrade_with_the_same_status() {
     let overrides: HostScript = [(
         "verify_session".to_owned(),

@@ -1,0 +1,45 @@
+{
+  "name": "build_slots_authors_the_card",
+  "description": "§14.9: with build_slots configured, the host authors the card — deliveries run verify → authorize → dry_run → build_slots (propose), again at confirm-time revalidation, and the emitted proposal carries the host-computed slot values (schema-checked like any other source).",
+  "spec": ["14.9", "9.7", "7.1"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret", "build_slots": true },
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "host": {},
+  "steps": [
+    { "connect": {} },
+    { "expect_connect": { "status": 101 } },
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581", "view_type": "detail" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal", "proposal_id": { "$bind": "P" },
+        "slots": { "title": "Remove co-buyer",
+                   "detail": "Remove co-buyer Jane Doe from TX-581" } }
+    ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" },
+        "state": "executed" }
+    ] }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session" },
+    { "endpoint": "authorize" },
+    { "endpoint": "dry_run" },
+    { "endpoint": "build_slots",
+      "body": { "kind": "build_slots",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "$exact": { "transactionId": "tx_581" } },
+                "preview": { "affected_count": 1 } } },
+    { "endpoint": "authorize" },
+    { "endpoint": "dry_run" },
+    { "endpoint": "build_slots" },
+    { "endpoint": "execute" }
+  ]
+}

@@ -133,6 +133,37 @@ title = { const = "t" }
 }
 
 #[test]
+fn build_slots_route_resolves_and_skips_slot_coverage() {
+    set_secret();
+    // No declarative slots for either action: without build_slots this
+    // config is rejected (required `title` slot uncovered); with the route
+    // the host authors slots at runtime and coverage moves to the
+    // propose-time schema check.
+    let config = Config::from_toml(&with_actions(
+        r#"
+[actions."*"]
+execute = "POST /hooks/{action}"
+dry_run = "POST /hooks/{action}/preview"
+build_slots = "POST /hooks/{action}/slots"
+"#,
+    ))
+    .expect("parses");
+    let resolved = config
+        .resolve(&schema())
+        .expect("resolves without slot tables");
+
+    assert_eq!(
+        resolved.actions["record.archive"]
+            .build_slots
+            .as_ref()
+            .expect("route")
+            .path,
+        "/hooks/record.archive/slots"
+    );
+    assert!(resolved.actions["record.open"].build_slots.is_some());
+}
+
+#[test]
 fn required_slots_must_be_covered() {
     set_secret();
     let config = Config::from_toml(&with_actions(

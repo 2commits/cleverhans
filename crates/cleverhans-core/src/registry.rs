@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::JsonMap;
 use crate::error::{RegistryError, ValidationFailure};
-use crate::seams::{ActionHandler, DryRunHandler, SlotBuilder, ToolDef};
+use crate::seams::{ActionHandler, AsyncSlotBuilder, DryRunHandler, SlotBuilder, ToolDef};
 
 /// Where a parameter's value comes from (spec §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +191,9 @@ pub struct ActionRegistration<P> {
     /// [`static_slots`](crate::seams::static_slots); param-aware cards pass
     /// a closure (see [`SlotBuilder`]).
     pub slot_builder: Option<Arc<dyn SlotBuilder>>,
+    /// Awaiting slot builder (§14.9 webhook and friends); mutually
+    /// exclusive with `slot_builder` (enforced at build).
+    pub async_slots: Option<Arc<dyn AsyncSlotBuilder<P>>>,
 }
 
 /// The closed action/block enumeration. Built once via [`RegistryBuilder`],
@@ -307,6 +310,7 @@ struct Attachment<P> {
     handler: Option<Arc<dyn ActionHandler<P>>>,
     dry_run: Option<Arc<dyn DryRunHandler<P>>>,
     slot_builder: Option<Arc<dyn SlotBuilder>>,
+    async_slots: Option<Arc<dyn AsyncSlotBuilder<P>>>,
 }
 
 /// Accumulates one action's handlers for [`RegistryBuilder::bind`].
@@ -314,6 +318,7 @@ pub struct ActionBinding<P> {
     handler: Option<Arc<dyn ActionHandler<P>>>,
     dry_run: Option<Arc<dyn DryRunHandler<P>>>,
     slot_builder: Option<Arc<dyn SlotBuilder>>,
+    async_slots: Option<Arc<dyn AsyncSlotBuilder<P>>>,
 }
 
 impl<P> ActionBinding<P> {
@@ -343,6 +348,14 @@ impl<P> ActionBinding<P> {
     #[must_use]
     pub fn static_slots(self, slots: JsonMap) -> Self {
         self.slots(crate::seams::static_slots(slots))
+    }
+
+    /// Awaiting slot content (§14.9 webhook, template services). Mutually
+    /// exclusive with [`ActionBinding::slots`] — build fails on both.
+    #[must_use]
+    pub fn async_slots(mut self, builder: impl AsyncSlotBuilder<P> + 'static) -> Self {
+        self.async_slots = Some(Arc::new(builder));
+        self
     }
 }
 
@@ -377,6 +390,7 @@ impl<P> RegistryBuilder<P> {
             handler: Some(handler),
             dry_run,
             slot_builder,
+            async_slots: None,
         });
         self
     }
@@ -433,12 +447,14 @@ impl<P> RegistryBuilder<P> {
             handler: None,
             dry_run: None,
             slot_builder: None,
+            async_slots: None,
         });
         self.attachments.push(Attachment {
             id: id.into(),
             handler: binding.handler,
             dry_run: binding.dry_run,
             slot_builder: binding.slot_builder,
+            async_slots: binding.async_slots,
         });
         self
     }
@@ -475,6 +491,7 @@ impl<P> RegistryBuilder<P> {
             handler,
             dry_run,
             slot_builder,
+            async_slots: None,
         });
         self
     }
@@ -502,11 +519,15 @@ impl<P> RegistryBuilder<P> {
             let Some(handler) = attachment.handler else {
                 return Err(RegistryError::MissingHandler(attachment.id));
             };
+            if attachment.slot_builder.is_some() && attachment.async_slots.is_some() {
+                return Err(RegistryError::ConflictingSlotBuilders(attachment.id));
+            }
             self.actions.push(ActionRegistration {
                 def: self.pending.remove(at),
                 handler,
                 dry_run: attachment.dry_run,
                 slot_builder: attachment.slot_builder,
+                async_slots: attachment.async_slots,
             });
         }
         if let Some(def) = self.pending.first() {
@@ -604,6 +625,42 @@ mod tests {
 
     mod build {
         use super::*;
+
+        #[test]
+        fn rejects_both_sync_and_async_slot_builders() {
+            struct NullSlots;
+
+            #[async_trait]
+            impl crate::seams::AsyncSlotBuilder<()> for NullSlots {
+                async fn build_slots(
+                    &self,
+                    _params: &JsonMap,
+                    _principal: &(),
+                    _preview: Option<&crate::envelope::DryRunPreview>,
+                ) -> Result<JsonMap, HandlerError> {
+                    Ok(JsonMap::new())
+                }
+            }
+
+            let schema = crate::schema::RegistrySchema {
+                spec_version: crate::SPEC_VERSION.to_owned(),
+                blocks: vec![confirm_block()],
+                actions: vec![action("a.b", false)],
+                context_params: [("recordId".to_owned(), "selected_record_id".to_owned())].into(),
+            };
+            let result = RegistryBuilder::<()>::from_schema(schema)
+                .bind("a.b", |binding| {
+                    binding
+                        .handler(NoopHandler)
+                        .static_slots(JsonMap::new())
+                        .async_slots(NullSlots)
+                })
+                .build();
+
+            assert!(
+                matches!(result, Err(RegistryError::ConflictingSlotBuilders(id)) if id == "a.b")
+            );
+        }
 
         #[test]
         fn rejects_duplicate_action_ids() {

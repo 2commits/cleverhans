@@ -51,6 +51,27 @@ Machine-readable request/response schemas (codegen-friendly, JSON Schema
 complete dependency-free reference host — CI-proven against `host-check`,
 signatures included — in [`examples/node-host/`](examples/node-host/).
 
+### Optional: host-authored slot content (`build_slots`)
+
+Declarative slot tables (`const`/`param`/`preview`) cover fixed cards; when
+a card needs computed text ("New title: …", "DK → NO"), give the action a
+fifth endpoint (spec §14.9):
+
+```toml
+[actions."document.rename"]
+execute = "POST /cleverhans/execute"
+dry_run = "POST /cleverhans/dry_run"
+build_slots = "POST /cleverhans/build_slots"   # wins over a slots table
+```
+
+You receive the common seam body plus `preview` (the dry-run result, or
+`null` for non-mutating actions); you return `{"slots": {…}}`. Returned
+slots still pass the block's slot schema — the closed rendered-UI
+vocabulary is unchanged. Per-action opt-in; failures fail closed (no card
+renders — a wrong card is a trust bug, silence beats guessing); never
+retried. The host vector for it is optional: `host-check` reports SKIP,
+not FAIL, if you don't implement it.
+
 ### Optional: verify payload signatures
 
 Set `signing_key_env` in the service config and every delivery carries

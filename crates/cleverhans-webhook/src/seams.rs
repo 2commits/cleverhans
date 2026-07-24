@@ -19,12 +19,14 @@ use cleverhans_core::JsonMap;
 use cleverhans_core::async_trait;
 use cleverhans_core::envelope::DryRunPreview;
 use cleverhans_core::error::HandlerError;
-use cleverhans_core::seams::{ActionHandler, AuthzDecision, AuthzResolver, DryRunHandler};
+use cleverhans_core::seams::{
+    ActionHandler, AsyncSlotBuilder, AuthzDecision, AuthzResolver, DryRunHandler,
+};
 
 use crate::client::{ExecuteDelivery, HostClient, Route};
 use crate::wire::{
-    AuthorizeResponse, Decision, DryRunResponse, ExecuteRequest, ExecuteResponse, SeamKind,
-    SeamRequest, VerifySessionRequest, WEBHOOK_VERSION,
+    AuthorizeResponse, BuildSlotsRequest, Decision, DryRunResponse, ExecuteRequest,
+    ExecuteResponse, SeamKind, SeamRequest, VerifySessionRequest, WEBHOOK_VERSION,
 };
 
 use std::sync::Arc;
@@ -154,6 +156,53 @@ impl DryRunHandler<Value> for WebhookDryRun {
             )),
             Err(err) => Err(HandlerError::Internal(err.to_string())),
         }
+    }
+}
+
+/// [`AsyncSlotBuilder`] delivering to a host's build_slots endpoint
+/// (§14.9). Every failure maps to [`HandlerError::Internal`] — fail closed
+/// (`invalid` at propose time, `expired` at confirm time); never retried.
+pub struct WebhookSlots {
+    client: Arc<HostClient>,
+    action_id: String,
+    route: Route,
+}
+
+impl WebhookSlots {
+    /// Binds one action's slot building to a route.
+    #[must_use]
+    pub fn new(client: Arc<HostClient>, action_id: impl Into<String>, route: Route) -> Self {
+        Self {
+            client,
+            action_id: action_id.into(),
+            route,
+        }
+    }
+}
+
+#[async_trait]
+impl AsyncSlotBuilder<Value> for WebhookSlots {
+    async fn build_slots(
+        &self,
+        params: &JsonMap,
+        principal: &Value,
+        preview: Option<&DryRunPreview>,
+    ) -> Result<JsonMap, HandlerError> {
+        let (session_id, principal) = split_principal(principal)?;
+        let request = BuildSlotsRequest {
+            webhook_version: WEBHOOK_VERSION,
+            kind: SeamKind::BuildSlots,
+            session_id: session_id.to_owned(),
+            action_id: self.action_id.clone(),
+            params: params.clone(),
+            principal: principal.clone(),
+            preview: preview.cloned(),
+        };
+        self.client
+            .build_slots(&self.route, &request)
+            .await
+            .map(|response| response.slots)
+            .map_err(|err| HandlerError::Internal(err.to_string()))
     }
 }
 

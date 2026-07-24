@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use cleverhans_conformance::fixture::{AuthzScript, Layer};
 use cleverhans_conformance::mock_host::HostScript;
 use cleverhans_conformance::{
-    Fixture, HostCheckTarget, HostVector, MockHost, ServiceVector, Vector,
+    Fixture, HostCheckOutcome, HostCheckTarget, HostVector, MockHost, ServiceVector, Vector,
     run_agent_vector_via_webhooks, run_host_vector, run_service_vector,
 };
 
@@ -142,7 +142,13 @@ async fn the_mock_host_passes_every_host_vector() {
         .await;
         let target = HostCheckTarget::new(host.base_url(), SECRET);
         match run_host_vector(&target, vector).await {
-            Ok(()) => lines.push(format!("[PASS] {file}")),
+            // MockHost implements every endpoint incl. optional ones, so a
+            // SKIP here would be a regression.
+            Ok(HostCheckOutcome::Passed) => lines.push(format!("[PASS] {file}")),
+            Ok(HostCheckOutcome::Skipped(reason)) => {
+                failures += 1;
+                lines.push(format!("[FAIL] {file}: unexpectedly skipped: {reason}"));
+            }
             Err(err) => {
                 failures += 1;
                 lines.push(format!("[FAIL] {file}: {err}"));

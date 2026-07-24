@@ -11,7 +11,9 @@ use clap::{Parser, Subcommand};
 
 use cleverhans_conformance::fixture::AuthzScript;
 use cleverhans_conformance::mock_host::HostScript;
-use cleverhans_conformance::{Fixture, HostCheckTarget, HostVector, MockHost, run_host_vector};
+use cleverhans_conformance::{
+    Fixture, HostCheckOutcome, HostCheckTarget, HostVector, MockHost, run_host_vector,
+};
 use cleverhans_serve::config::Config;
 use cleverhans_serve::{build_app, load_schema};
 
@@ -48,6 +50,10 @@ const HOST_VECTORS: &[(&str, &str)] = &[
     (
         "verify_session_returns_principal",
         include_str!("../embedded/verify_session_returns_principal.json"),
+    ),
+    (
+        "build_slots_returns_slots",
+        include_str!("../embedded/build_slots_returns_slots.json"),
     ),
 ];
 
@@ -174,7 +180,8 @@ async fn host_check(base_url: &str, secret: &str, signing_key: Option<&str>) -> 
         let vector: HostVector =
             serde_json::from_str(json).with_context(|| format!("parse vector `{name}`"))?;
         match run_host_vector(&target, &vector).await {
-            Ok(()) => println!("[PASS] {name}"),
+            Ok(HostCheckOutcome::Passed) => println!("[PASS] {name}"),
+            Ok(HostCheckOutcome::Skipped(reason)) => println!("[SKIP] {name}: {reason}"),
             Err(err) => {
                 failures += 1;
                 println!("[FAIL] {name}: {err}");

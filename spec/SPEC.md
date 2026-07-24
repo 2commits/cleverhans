@@ -1,8 +1,12 @@
 # CleverHans Protocol Specification
 
-**Version:** 0.1.3-draft
+**Version:** 0.1.4-draft
 **Status:** Draft
 **Tracking:** ED-536
+
+*Changes in 0.1.4: optional §14.9 `build_slots` endpoint — host-authored
+dynamic slot content in the service topology. Additive; webhook contract
+version remains 1, wire version remains `0.1`.*
 
 *Changes in 0.1.3: optional §14.2 payload signing
 (`X-CleverHans-Signature`). Additive; webhook contract version remains 1,
@@ -608,11 +612,13 @@ configuration.
 | `authorize` | yes | §9.3 — a host with no per-action permissions returns `{"decision":"allow"}` unconditionally; a trivial handler is cheaper than an optional endpoint in the contract |
 | `dry_run` | iff any registered action has `mutates: true` | §9.2 dry-run |
 | `execute` | yes | §9.2 handler |
+| `build_slots` | optional, per action (§14.9) | §9.7 slot builder |
 
-Slot building and context-param resolution do **not** cross the wire: context params are
-filled by the service from the registry's `context_params` mapping (§4.1), and slots come
-from declarative slot configuration in the service (§9.7 semantics, app-authored). A
-`build_slots` webhook is a reserved future additive endpoint.
+Context-param resolution does **not** cross the wire: context params are filled by the
+service from the registry's `context_params` mapping (§4.1). Slots come from declarative
+slot configuration in the service (§9.7 semantics, app-authored) — or, per action, from
+the optional `build_slots` endpoint (§14.9) when a deployment wants host-computed slot
+content.
 
 ### 14.2 Headers
 
@@ -740,8 +746,8 @@ never happened), never execute twice.
 ### 14.7 Timeouts
 
 Defaults, deployment-configurable: `verify_session` 5 s, `authorize` 5 s, `dry_run`
-10 s, `execute` 30 s. Every timeout maps per the tables above; nothing times out into
-an open-failed state, and only `execute` is ever retried.
+10 s, `execute` 30 s, `build_slots` 10 s. Every timeout maps per the tables above;
+nothing times out into an open-failed state, and only `execute` is ever retried.
 
 ### 14.8 Transport security
 
@@ -749,6 +755,40 @@ Service-to-host traffic runs over loopback or TLS. The reference implementation 
 to start with a non-loopback plaintext upstream URL or without a service secret, absent
 explicit `danger_`-prefixed configuration overrides. mTLS is recommended where the
 deployment supports it (deployment note, not contract).
+
+### 14.9 `build_slots` (optional)
+
+Host-authored dynamic slot content — the wire form of the §9.7 slot builder, for
+deployments where declarative slot configuration cannot phrase a card (e.g. text
+composed from utterance params). Configured per action; actions without it use the
+service's declarative slot configuration. When both are configured for one action, the
+endpoint wins.
+
+Called wherever the §9.7 builder runs: inside propose-time validation after the dry-run
+step (the request carries the preview) and before the slot schema check, and again
+during confirm-time revalidation (§7.3 step 1).
+
+Request: the common seam shape with `"kind": "build_slots"`, plus:
+
+```
+{ …,
+  "preview": <DryRunPreview §6.4> | null }
+```
+
+`preview` is `null` for non-mutating actions.
+
+Response: `200 {"slots": { "<slot>": <value>, … }}`. No outcome envelope — slot
+building is presentation, not a gate; `authorize` (§14.4) and `dry_run` (§14.5) are the
+gates. The returned slots MUST pass the block type's slot schema (§7.1 step 4) exactly
+like any other slot source — the closed rendered-UI vocabulary (§12.10) is unchanged.
+
+| Host behavior | At propose time | At confirm time |
+|---|---|---|
+| Non-200, timeout, network error, malformed body | Proposal `invalid` (unrendered) | `expired` |
+| `200` slots failing the block schema | `invalid` (schema check, §7.1) | `expired` |
+
+Fail closed, always; never retried. A wrong card is a trust bug even when execution is
+safe — silence beats guessing, exactly as §5's decline-over-guess rule.
 
 ## Appendix A — worked example
 

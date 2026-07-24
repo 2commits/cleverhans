@@ -224,6 +224,49 @@ async fn execute_timeout_retries_with_the_same_idempotency_key() {
 }
 
 #[tokio::test]
+async fn build_slots_delivers_preview_and_maps_failures_closed() {
+    use cleverhans_core::seams::AsyncSlotBuilder;
+    let (addr, deliveries) = serve_stub(
+        vec![
+            (200, json!({"slots": {"title": "Rename to “Q3 Roadmap”"}})),
+            (500, json!({"error": "template service down"})),
+        ],
+        None,
+    )
+    .await;
+    let builder =
+        cleverhans_webhook::WebhookSlots::new(client(addr, None), "record.touch", route());
+    let preview = cleverhans_core::envelope::DryRunPreview {
+        affected_count: 1,
+        ..Default::default()
+    };
+
+    let slots = builder
+        .build_slots(&params(), &wrapped(), Some(&preview))
+        .await
+        .expect("slots");
+    assert_eq!(slots["title"], json!("Rename to “Q3 Roadmap”"));
+    {
+        let log = deliveries.lock().expect("lock");
+        let (_, _, body) = &log[0];
+        assert_eq!(body["kind"], "build_slots");
+        assert_eq!(body["preview"]["affected_count"], 1);
+        assert_eq!(body["session_id"], "s_test");
+        // Wire carries the host principal verbatim — no session envelope.
+        assert_eq!(body["principal"]["user_id"], "alex");
+    }
+
+    let err = builder
+        .build_slots(&params(), &wrapped(), None)
+        .await
+        .expect_err("fail closed");
+    assert!(err.to_string().starts_with("internal:"), "got {err}");
+    // Second delivery carried a null preview for the non-mutating shape.
+    let log = deliveries.lock().expect("lock");
+    assert!(log[1].2["preview"].is_null());
+}
+
+#[tokio::test]
 async fn dry_run_maps_preview_rejected_and_failure() {
     let (addr, _) = serve_stub(
         vec![

@@ -372,6 +372,47 @@ pub fn static_slots(slots: JsonMap) -> Arc<dyn SlotBuilder> {
     Arc::new(move |_: &JsonMap, _: Option<&DryRunPreview>| slots.clone())
 }
 
+/// The awaiting sibling of [`SlotBuilder`], for slot content that leaves
+/// the process — the §14.9 `build_slots` webhook, a template service, a
+/// database read. Two deliberate differences from the sync seam: it is
+/// fallible (slot building runs inside propose-time validation, and a
+/// failure fails closed — `invalid` / `expired` — rather than rendering a
+/// wrong card), and it receives the principal (out-of-process seams carry
+/// it per the §14 common shape; in-process builders may ignore it).
+///
+/// Registered via [`crate::registry::ActionBinding::async_slots`]; an
+/// action registers *either* a [`SlotBuilder`] or an `AsyncSlotBuilder`,
+/// never both.
+#[async_trait]
+pub trait AsyncSlotBuilder<P>: Send + Sync {
+    /// Produces the slot map validated against the block's slot schema.
+    ///
+    /// # Errors
+    ///
+    /// [`HandlerError`] — the candidate becomes `invalid` at propose time,
+    /// `expired` at confirm time.
+    async fn build_slots(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+        preview: Option<&DryRunPreview>,
+    ) -> Result<JsonMap, HandlerError>;
+}
+
+/// An `Arc`'d async slot builder is an async slot builder; see the matching
+/// [`ActionHandler`] impl for `Arc<dyn ActionHandler<P>>`.
+#[async_trait]
+impl<P: Send + Sync> AsyncSlotBuilder<P> for Arc<dyn AsyncSlotBuilder<P>> {
+    async fn build_slots(
+        &self,
+        params: &JsonMap,
+        principal: &P,
+        preview: Option<&DryRunPreview>,
+    ) -> Result<JsonMap, HandlerError> {
+        (**self).build_slots(params, principal, preview).await
+    }
+}
+
 /// One entry in the model-facing tool list, derived from the registry.
 /// Exposes only utterance-sourced params (spec §4.1).
 #[derive(Debug, Clone, PartialEq, Serialize)]
