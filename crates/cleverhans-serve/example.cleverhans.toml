@@ -12,6 +12,7 @@ path = "/agent"
 [upstream]
 base_url = "http://localhost:3000"
 secret_env = "CLEVERHANS_UPSTREAM_SECRET"   # sent as `Authorization: Bearer <value>`
+# signing_key_env = "CLEVERHANS_SIGNING_KEY"  # §14.2 HMAC payload signatures (optional)
 # danger_allow_remote_http = true           # required for plaintext beyond loopback
 # danger_allow_missing_secret = true        # required to run without a secret
 

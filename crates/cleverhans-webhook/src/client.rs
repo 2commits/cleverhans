@@ -95,6 +95,9 @@ pub struct HostClientConfig {
     pub base_url: String,
     /// Service-to-service bearer secret (spec §14.2).
     pub secret: Option<String>,
+    /// HMAC signing key for `X-CleverHans-Signature` (spec §14.2,
+    /// optional).
+    pub signing_key: Option<String>,
     /// Per-endpoint timeouts.
     pub timeouts: Timeouts,
     /// Execute retry policy.
@@ -172,6 +175,7 @@ pub struct HostClient {
     http: reqwest::Client,
     base_url: String,
     secret: Option<String>,
+    signing_key: Option<String>,
     timeouts: Timeouts,
     retry: RetryPolicy,
 }
@@ -208,6 +212,7 @@ impl HostClient {
             http,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             secret: config.secret,
+            signing_key: config.signing_key,
             timeouts: config.timeouts,
             retry: config.retry,
         })
@@ -226,17 +231,31 @@ impl HostClient {
         body: &impl Serialize,
     ) -> Result<reqwest::Response, DeliveryError> {
         let url = format!("{}{}", self.base_url, route.path);
+        // Serialize once and send those exact bytes: the §14.2 signature is
+        // over the body as delivered, never a re-serialization.
+        let bytes = serde_json::to_vec(body)
+            .map_err(|err| DeliveryError::MalformedBody(err.to_string()))?;
         let mut request = self
             .http
             .request(route.method.clone(), &url)
             .timeout(timeout)
+            .header("content-type", "application/json")
             .header("x-cleverhans-webhook-version", WEBHOOK_VERSION)
-            .header("x-cleverhans-delivery", uuid::Uuid::new_v4().to_string())
-            .json(body);
+            .header("x-cleverhans-delivery", uuid::Uuid::new_v4().to_string());
         if let Some(secret) = &self.secret {
             request = request.header("authorization", format!("Bearer {secret}"));
         }
-        let response = request.send().await.map_err(|err| {
+        if let Some(key) = &self.signing_key {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or_default();
+            request = request.header(
+                crate::sign::SIGNATURE_HEADER,
+                crate::sign::signature_header(key.as_bytes(), timestamp, &bytes),
+            );
+        }
+        let response = request.body(bytes).send().await.map_err(|err| {
             DeliveryError::Unreachable(if err.is_timeout() {
                 format!("timeout after {timeout:?} delivering to {url}")
             } else {

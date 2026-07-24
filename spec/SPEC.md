@@ -1,8 +1,12 @@
 # CleverHans Protocol Specification
 
-**Version:** 0.1.2-draft
+**Version:** 0.1.3-draft
 **Status:** Draft
 **Tracking:** ED-536
+
+*Changes in 0.1.3: optional §14.2 payload signing
+(`X-CleverHans-Signature`). Additive; webhook contract version remains 1,
+wire version remains `0.1`.*
 
 *Changes in 0.1.2: standalone service topology (§10.2), host webhook contract
 (§14) with its own independent version integer, security invariants 11–14
@@ -617,11 +621,29 @@ from declarative slot configuration in the service (§9.7 semantics, app-authore
 | `Authorization: Bearer <service-secret>` | Service-to-service credential from deployment config. The host MUST verify it on all endpoints (invariant 11). |
 | `X-CleverHans-Webhook-Version: 1` | Contract version. The host MUST reject an unknown version with `400` and body `{"error": "unsupported_webhook_version", "supported": [1]}`; the service MUST treat that as fatal misconfiguration — fail closed, log, do not degrade. |
 | `X-CleverHans-Delivery: <uuid>` | Unique per HTTP attempt (changes on retry). Log correlation only; NOT the idempotency key. |
+| `X-CleverHans-Signature: t=<unix>,v1=<hex>` | OPTIONAL payload signature; see below. |
 | `Content-Type: application/json` | Both directions. |
 
 The user's credentials appear only in the `verify_session` body, never in the headers of
-the other calls, and never after session establishment (invariant 12). Payload HMAC
-signing (`X-CleverHans-Signature`) is a reserved future additive header.
+the other calls, and never after session establishment (invariant 12).
+
+**Payload signing (optional).** A service configured with a signing key MUST add
+`X-CleverHans-Signature: t=<unix>,v1=<hex>` to every delivery, where `<unix>` is the
+current time in seconds and `<hex>` is lowercase
+`HMAC-SHA256(key, "<t>" || "." || body)` computed over the **exact body bytes as sent**
+— implementations MUST sign the serialized bytes they transmit, never a
+re-serialization. A verifying host MUST reject (401) a delivery whose timestamp is
+outside its skew window (RECOMMENDED default: 5 minutes), whose signature matches no
+configured key, or — when the host requires signatures — that carries no signature at
+all; comparison MUST be constant-time. During key rotation a host MAY accept several
+keys, and a header MAY carry several `v1=` pairs; any valid pair passes. The header is
+additive: hosts that ignore it lose nothing, and the webhook version stays 1. What it
+buys a verifying host: the credential never travels the wire (a logged request leaks no
+minting capability, unlike the bearer secret), payload integrity across
+TLS-terminating middleboxes, and a bounded replay window. Known-answer vector for
+implementers: key `test-signing-key`, t `1700000000`, body
+`{"kind":"execute","params":{}}` →
+`t=1700000000,v1=54043b28f3ce9c05dd923645ca289ac7cee7910b87042a03b29677cef8ffdf50`.
 
 ### 14.3 `verify_session`
 

@@ -162,6 +162,76 @@ async fn full_confirm_flow_executes_through_the_webhooks() {
 }
 
 #[tokio::test]
+async fn signed_deliveries_pass_a_host_that_requires_signatures() {
+    // SAFETY: test-only env mutation, name unique to this test binary.
+    unsafe { std::env::set_var("E2E_SIGNING_KEY", "e2e-signing-key") };
+    let host = MockHost::spawn_at(
+        fixture(),
+        AuthzScript::default(),
+        HostScript::new(),
+        SECRET,
+        Some("e2e-signing-key"),
+        "127.0.0.1:0",
+    )
+    .await;
+    let schema = load_schema(&registry_json()).expect("schema");
+    let toml = config_toml(&host.base_url()).replace(
+        "secret_env = \"E2E_SECRET\"",
+        "secret_env = \"E2E_SECRET\"\nsigning_key_env = \"E2E_SIGNING_KEY\"",
+    );
+    unsafe { std::env::set_var("E2E_SECRET", SECRET) };
+    let config = Config::from_toml(&toml).expect("config");
+    let resolved = config.resolve(&schema).expect("resolve");
+    let llm = cleverhans::llm::build_llm(config.llm.resolve().expect("llm"));
+    let app = build_app(&resolved, &schema, llm).expect("build app");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/agent"))
+        .await
+        .expect("signed verify_session accepted");
+    ws.send(Message::Text(
+        json!({"type": "init", "spec_version": "0.1.0-draft",
+               "context": {"route": "/transactions/tx_581",
+                            "selected_record_id": "tx_581", "view_type": "detail"}})
+        .to_string(),
+    ))
+    .await
+    .expect("send init");
+    ws.send(Message::Text(
+        json!({"type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1"})
+            .to_string(),
+    ))
+    .await
+    .expect("send message");
+    let proposal = next_event(&mut ws).await;
+    assert_eq!(proposal["type"], "action_proposal", "got {proposal}");
+    ws.send(Message::Text(
+        json!({"type": "confirm_action", "proposal_id": proposal["proposal_id"]}).to_string(),
+    ))
+    .await
+    .expect("send confirm");
+    let executed = next_event(&mut ws).await;
+    assert_eq!(executed["state"], "executed", "got {executed}");
+
+    // Every delivery to the signature-requiring host carried a signature.
+    let deliveries = host.deliveries.lock().expect("deliveries");
+    assert!(!deliveries.is_empty());
+    for delivery in deliveries.iter() {
+        assert!(
+            delivery.headers.contains_key("x-cleverhans-signature"),
+            "unsigned delivery to {}",
+            delivery.endpoint
+        );
+    }
+}
+
+#[tokio::test]
 async fn refused_verification_refuses_the_upgrade_with_the_same_status() {
     let overrides: HostScript = [(
         "verify_session".to_owned(),

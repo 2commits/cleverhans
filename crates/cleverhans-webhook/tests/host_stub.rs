@@ -89,6 +89,7 @@ fn client(addr: SocketAddr, execute_timeout: Option<Duration>) -> Arc<HostClient
         HostClient::new(HostClientConfig {
             base_url: format!("http://{addr}"),
             secret: Some("test-secret".to_owned()),
+            signing_key: None,
             timeouts: Timeouts {
                 execute: execute_timeout.unwrap_or(Timeouts::default().execute),
                 ..Timeouts::default()
@@ -345,6 +346,7 @@ fn client_refuses_remote_plaintext_and_missing_secret() {
     let remote = HostClient::new(HostClientConfig {
         base_url: "http://10.0.0.5:3000".to_owned(),
         secret: Some("s".to_owned()),
+        signing_key: None,
         timeouts: Timeouts::default(),
         retry: RetryPolicy::default(),
         danger_allow_remote_http: false,
@@ -355,6 +357,7 @@ fn client_refuses_remote_plaintext_and_missing_secret() {
     let no_secret = HostClient::new(HostClientConfig {
         base_url: "http://127.0.0.1:3000".to_owned(),
         secret: None,
+        signing_key: None,
         timeouts: Timeouts::default(),
         retry: RetryPolicy::default(),
         danger_allow_remote_http: false,
@@ -365,6 +368,7 @@ fn client_refuses_remote_plaintext_and_missing_secret() {
     let https_remote = HostClient::new(HostClientConfig {
         base_url: "https://host.internal".to_owned(),
         secret: Some("s".to_owned()),
+        signing_key: None,
         timeouts: Timeouts::default(),
         retry: RetryPolicy::default(),
         danger_allow_remote_http: false,

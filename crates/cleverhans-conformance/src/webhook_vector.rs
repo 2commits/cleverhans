@@ -35,6 +35,10 @@ pub struct ServiceConfig {
     /// Header forward-allowlist; defaults to `authorization` + `cookie`.
     #[serde(default)]
     pub forward_headers: Option<Vec<String>>,
+    /// §14.2 HMAC signing key; when set, the service signs every delivery
+    /// and the mock host requires a valid signature.
+    #[serde(default)]
+    pub signing_key: Option<String>,
 }
 
 /// One `webhook/service/` step.
@@ -111,11 +115,13 @@ pub fn build_webhook_agent(
     llm: &[Vec<LlmItem>],
     host: &MockHost,
     secret: &str,
+    signing_key: Option<&str>,
 ) -> (Arc<Agent<Value>>, Arc<HostClient>) {
     let client = Arc::new(
         HostClient::new(HostClientConfig {
             base_url: host.base_url(),
             secret: Some(secret.to_owned()),
+            signing_key: signing_key.map(str::to_owned),
             timeouts: short_timeouts(),
             retry: RetryPolicy {
                 execute_attempts: 2,
@@ -190,7 +196,7 @@ pub async fn run_agent_vector_via_webhooks(
         SECRET,
     )
     .await;
-    let (agent, _client) = build_webhook_agent(fixture, &vector.llm, &host, SECRET);
+    let (agent, _client) = build_webhook_agent(fixture, &vector.llm, &host, SECRET, None);
     let principal =
         cleverhans_webhook::seams::session_principal("s_conformance", default_principal());
     let mut session = Session::new(principal);
@@ -237,15 +243,22 @@ pub async fn run_agent_vector_via_webhooks(
 ///
 /// Any expectation mismatch naming the failing step or delivery.
 pub async fn run_service_vector(fixture: &Fixture, vector: &ServiceVector) -> Result<(), String> {
-    let host = MockHost::spawn(
+    let host = MockHost::spawn_at(
         fixture.clone(),
         crate::fixture::AuthzScript::default(),
         vector.host.clone(),
         &vector.service_config.secret,
+        vector.service_config.signing_key.as_deref(),
+        "127.0.0.1:0",
     )
     .await;
-    let (agent, client) =
-        build_webhook_agent(fixture, &vector.llm, &host, &vector.service_config.secret);
+    let (agent, client) = build_webhook_agent(
+        fixture,
+        &vector.llm,
+        &host,
+        &vector.service_config.secret,
+        vector.service_config.signing_key.as_deref(),
+    );
     let verifier = WebhookVerifier::new(
         client,
         Route::from_str(&format!("POST {VERIFY_SESSION_PATH}")).expect("route"),
