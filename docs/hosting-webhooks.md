@@ -59,7 +59,9 @@ Replays the conformance vectors from `spec/vectors/webhook/host/` — auth
 discipline, version rejection, idempotent replay, the §14 body shapes.
 Green means serve-compatible. To test *your* integration code against a
 known-good counterpart first: `cleverhans mock-host` runs the reference
-host with the `co-buyer` demo fixture.
+host with the `co-buyer` demo fixture — or with your own registry via
+`--fixture my-fixture.json` (registry + scripted seams, the
+`spec/vectors/README.md` fixture format).
 
 For a full end-to-end playground of the service itself — real stateful
 backend, real model, the React click-around UI — pair it with the demo
