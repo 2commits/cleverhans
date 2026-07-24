@@ -119,6 +119,10 @@ pub struct UpstreamSection {
     /// Env var holding the service-to-service secret.
     #[serde(default = "default_secret_env")]
     pub secret_env: String,
+    /// Env var holding the §14.2 HMAC signing key (optional; enables
+    /// `X-CleverHans-Signature` on every delivery).
+    #[serde(default)]
+    pub signing_key_env: Option<String>,
     /// Per-endpoint timeouts.
     #[serde(default)]
     pub timeouts: TimeoutsSection,
@@ -342,6 +346,15 @@ impl Config {
                 ));
             }
         };
+        let signing_key = self
+            .upstream
+            .signing_key_env
+            .as_ref()
+            .map(|env| {
+                std::env::var(env)
+                    .map_err(|_| ConfigError::MissingEnv(env.clone(), "upstream.signing_key_env"))
+            })
+            .transpose()?;
         let wildcard = self.actions.get("*");
         let mut actions = BTreeMap::new();
         for def in &schema.actions {
@@ -406,6 +419,7 @@ impl Config {
             client: cleverhans_webhook::client::HostClientConfig {
                 base_url: self.upstream.base_url.clone(),
                 secret,
+                signing_key,
                 timeouts: self.upstream.timeouts.resolve(),
                 retry: self.upstream.retry.resolve(),
                 danger_allow_remote_http: self.upstream.danger_allow_remote_http,

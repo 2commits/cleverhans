@@ -88,7 +88,9 @@ Test an agent service implementation of the §14 host webhook contract (the
 format extends the agent-layer case format:
 
 - `service_config` — deployment config the runner applies to the service
-  under test: `{"secret": "<service-secret>", "forward_headers": [..]?}`.
+  under test: `{"secret": "<service-secret>", "forward_headers": [..]?,
+  "signing_key": "<hmac-key>"?}`. With `signing_key` set, the mock host
+  REQUIRES a valid §14.2 signature on every delivery.
 - `host` — per-endpoint response scripts, keyed `verify_session` /
   `authorize` / `dry_run` / `execute`. Each is an array indexed by call
   count (or `{"sequence": [...], "then": <entry>}`), entries:

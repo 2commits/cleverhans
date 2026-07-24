@@ -18,6 +18,7 @@
 
 pub mod client;
 pub mod seams;
+pub mod sign;
 pub mod wire;
 
 pub use client::{

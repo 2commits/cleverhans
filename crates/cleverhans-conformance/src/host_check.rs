@@ -16,6 +16,8 @@ pub struct HostCheckTarget {
     pub base_url: String,
     /// The service secret the host expects.
     pub secret: String,
+    /// §14.2 HMAC signing key, for hosts that require payload signatures.
+    pub signing_key: Option<String>,
     /// Endpoint name → path overrides; defaults are the §14.1 paths.
     pub paths: BTreeMap<String, String>,
 }
@@ -27,6 +29,7 @@ impl HostCheckTarget {
         Self {
             base_url: base_url.into(),
             secret: secret.into(),
+            signing_key: None,
             paths: BTreeMap::new(),
         }
     }
@@ -113,14 +116,28 @@ pub async fn run_host_vector(target: &HostCheckTarget, vector: &HostVector) -> R
     for (index, request) in vector.requests.iter().enumerate() {
         let url = format!("{base}{}", target.path(&request.endpoint));
         let body = substitute(&request.body, &bindings);
+        // Serialize once; a §14.2 signature must cover the exact sent bytes.
+        let bytes =
+            serde_json::to_vec(&body).map_err(|err| format!("request {index}: encode: {err}"))?;
         let mut call = client
             .post(&url)
+            .header("content-type", "application/json")
             .header(
                 "x-cleverhans-webhook-version",
                 request.webhook_version.unwrap_or(1).to_string(),
             )
-            .header("x-cleverhans-delivery", uuid_like(index))
-            .json(&body);
+            .header("x-cleverhans-delivery", uuid_like(index));
+        if let Some(key) = &target.signing_key {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or_default();
+            call = call.header(
+                cleverhans_webhook::sign::SIGNATURE_HEADER,
+                cleverhans_webhook::sign::signature_header(key.as_bytes(), now, &bytes),
+            );
+        }
+        call = call.body(bytes);
         call = match request.auth {
             AuthMode::Valid => call.header("authorization", format!("Bearer {}", target.secret)),
             AuthMode::Invalid => call.header("authorization", "Bearer definitely-wrong"),

@@ -96,6 +96,8 @@ pub type DeliveryLog = Arc<Mutex<Vec<Delivery>>>;
 
 struct HostState {
     secret: String,
+    /// When set, every delivery must carry a valid §14.2 signature.
+    signing_key: Option<String>,
     fixture: Fixture,
     authz: AuthzScript,
     overrides: HostScript,
@@ -134,11 +136,11 @@ impl MockHost {
         overrides: HostScript,
         secret: &str,
     ) -> Self {
-        Self::spawn_at(fixture, authz, overrides, secret, "127.0.0.1:0").await
+        Self::spawn_at(fixture, authz, overrides, secret, None, "127.0.0.1:0").await
     }
 
     /// Spawns a mock host on a specific address (the `cleverhans mock-host`
-    /// subcommand).
+    /// subcommand), optionally requiring §14.2 payload signatures.
     ///
     /// # Panics
     ///
@@ -148,12 +150,14 @@ impl MockHost {
         authz: AuthzScript,
         overrides: HostScript,
         secret: &str,
+        signing_key: Option<&str>,
         bind: &str,
     ) -> Self {
         let deliveries: DeliveryLog = Arc::new(Mutex::new(Vec::new()));
         let executions: ExecutionLog = Arc::new(Mutex::new(Vec::new()));
         let state = Arc::new(HostState {
             secret: secret.to_owned(),
+            signing_key: signing_key.map(str::to_owned),
             fixture,
             authz,
             overrides,
@@ -191,8 +195,14 @@ impl MockHost {
     }
 }
 
-/// §14.2 header discipline: bearer secret and known contract version.
-fn check_headers(state: &HostState, headers: &HeaderMap) -> Result<(), Box<Response>> {
+/// §14.2 header discipline: bearer secret, known contract version, and —
+/// when this host requires it — a valid payload signature over the exact
+/// received bytes.
+fn check_headers(
+    state: &HostState,
+    headers: &HeaderMap,
+    raw_body: &[u8],
+) -> Result<(), Box<Response>> {
     let authorized = headers
         .get("authorization")
         .and_then(|value| value.to_str().ok())
@@ -217,6 +227,33 @@ fn check_headers(state: &HostState, headers: &HeaderMap) -> Result<(), Box<Respo
             )
                 .into_response(),
         ));
+    }
+    if let Some(key) = &state.signing_key {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default();
+        let verified = headers
+            .get(cleverhans_webhook::sign::SIGNATURE_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(|header| {
+                cleverhans_webhook::sign::verify_signature(
+                    &[key.as_bytes()],
+                    header,
+                    raw_body,
+                    now,
+                    cleverhans_webhook::sign::DEFAULT_SKEW,
+                )
+            });
+        if !matches!(verified, Some(Ok(()))) {
+            return Err(Box::new(
+                (
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(json!({"error": "bad signature"})),
+                )
+                    .into_response(),
+            ));
+        }
     }
     Ok(())
 }
@@ -274,10 +311,11 @@ async fn verify_session(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let body = parse(&body);
-    if let Err(refusal) = check_headers(&state, &headers) {
+    let parsed = parse(&body);
+    if let Err(refusal) = check_headers(&state, &headers, &body) {
         return *refusal;
     }
+    let body = parsed;
     if let Some(response) = record_and_override(&state, "verify_session", &headers, &body).await {
         return response;
     }
@@ -289,10 +327,11 @@ async fn authorize(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let body = parse(&body);
-    if let Err(refusal) = check_headers(&state, &headers) {
+    let parsed = parse(&body);
+    if let Err(refusal) = check_headers(&state, &headers, &body) {
         return *refusal;
     }
+    let body = parsed;
     if let Some(response) = record_and_override(&state, "authorize", &headers, &body).await {
         return response;
     }
@@ -309,10 +348,11 @@ async fn authorize(
 }
 
 async fn dry_run(State(state): State<Arc<HostState>>, headers: HeaderMap, body: Bytes) -> Response {
-    let body = parse(&body);
-    if let Err(refusal) = check_headers(&state, &headers) {
+    let parsed = parse(&body);
+    if let Err(refusal) = check_headers(&state, &headers, &body) {
         return *refusal;
     }
+    let body = parsed;
     if let Some(response) = record_and_override(&state, "dry_run", &headers, &body).await {
         return response;
     }
@@ -350,10 +390,11 @@ async fn dry_run(State(state): State<Arc<HostState>>, headers: HeaderMap, body: 
 }
 
 async fn execute(State(state): State<Arc<HostState>>, headers: HeaderMap, body: Bytes) -> Response {
-    let body = parse(&body);
-    if let Err(refusal) = check_headers(&state, &headers) {
+    let parsed = parse(&body);
+    if let Err(refusal) = check_headers(&state, &headers, &body) {
         return *refusal;
     }
+    let body = parsed;
     if let Some(response) = record_and_override(&state, "execute", &headers, &body).await {
         return response;
     }

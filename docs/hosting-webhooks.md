@@ -49,6 +49,34 @@ transaction as the mutation.
 Machine-readable request/response schemas (codegen-friendly, JSON Schema
 2020-12) live in [`spec/webhook/schemas/`](../spec/webhook/schemas/).
 
+### Optional: verify payload signatures
+
+Set `signing_key_env` in the service config and every delivery carries
+`X-CleverHans-Signature: t=<unix>,v1=<hex>` — HMAC-SHA256 over
+`"<t>." + raw body bytes` (spec §14.2). Verifying it buys you payload
+integrity past TLS termination, a bounded replay window, and a credential
+that never travels the wire. Verify against the **raw** request bytes,
+before any JSON parsing:
+
+```js
+import crypto from "node:crypto";
+
+function verifySignature(header, rawBody, key, skewSeconds = 300) {
+  const parts = Object.fromEntries(header.split(",").map(p => p.split("=")));
+  if (Math.abs(Date.now() / 1000 - Number(parts.t)) > skewSeconds) return false;
+  const expected = crypto.createHmac("sha256", key)
+    .update(`${parts.t}.`).update(rawBody).digest();
+  const got = Buffer.from(parts.v1, "hex");
+  return got.length === expected.length && crypto.timingSafeEqual(got, expected);
+}
+```
+
+Known-answer check for your implementation: key `test-signing-key`,
+t `1700000000`, body `{"kind":"execute","params":{}}` →
+`v1=54043b28f3ce9c05dd923645ca289ac7cee7910b87042a03b29677cef8ffdf50`.
+Hosts that require signatures: run `cleverhans host-check … --signing-key $K`
+and `cleverhans mock-host --signing-key $K` behaves like you should.
+
 ## 2. Check your host
 
 ```sh

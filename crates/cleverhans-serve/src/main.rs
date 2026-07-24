@@ -84,6 +84,9 @@ enum Command {
         /// The service secret the host expects.
         #[arg(long)]
         secret: String,
+        /// §14.2 HMAC signing key, for hosts that require signatures.
+        #[arg(long)]
+        signing_key: Option<String>,
     },
     /// Run the known-good reference host (co-buyer fixture semantics).
     MockHost {
@@ -98,6 +101,9 @@ enum Command {
         /// co-buyer demo — e.g. your own registry with scripted handlers.
         #[arg(long)]
         fixture: Option<PathBuf>,
+        /// Require a valid §14.2 signature on every delivery (HMAC key).
+        #[arg(long)]
+        signing_key: Option<String>,
     },
 }
 
@@ -119,12 +125,17 @@ async fn main() -> anyhow::Result<()> {
             config,
             bind,
         } => serve(&registry, &config, bind).await,
-        Command::HostCheck { base_url, secret } => host_check(&base_url, &secret).await,
+        Command::HostCheck {
+            base_url,
+            secret,
+            signing_key,
+        } => host_check(&base_url, &secret, signing_key.as_deref()).await,
         Command::MockHost {
             bind,
             secret,
             fixture,
-        } => mock_host(&bind, &secret, fixture.as_deref()).await,
+            signing_key,
+        } => mock_host(&bind, &secret, fixture.as_deref(), signing_key.as_deref()).await,
     }
 }
 
@@ -155,8 +166,9 @@ async fn serve(registry: &PathBuf, config: &PathBuf, bind: Option<String>) -> an
     Ok(())
 }
 
-async fn host_check(base_url: &str, secret: &str) -> anyhow::Result<()> {
-    let target = HostCheckTarget::new(base_url, secret);
+async fn host_check(base_url: &str, secret: &str, signing_key: Option<&str>) -> anyhow::Result<()> {
+    let mut target = HostCheckTarget::new(base_url, secret);
+    target.signing_key = signing_key.map(str::to_owned);
     let mut failures = 0usize;
     for (name, json) in HOST_VECTORS {
         let vector: HostVector =
@@ -183,6 +195,7 @@ async fn mock_host(
     bind: &str,
     secret: &str,
     fixture: Option<&std::path::Path>,
+    signing_key: Option<&str>,
 ) -> anyhow::Result<()> {
     let (fixture, source): (Fixture, String) = match fixture {
         Some(path) => {
@@ -204,6 +217,7 @@ async fn mock_host(
         AuthzScript::default(),
         HostScript::new(),
         secret,
+        signing_key,
         bind,
     )
     .await;
