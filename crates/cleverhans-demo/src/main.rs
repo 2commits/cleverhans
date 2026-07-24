@@ -28,8 +28,7 @@ use cleverhans::prelude::*;
 
 use registry::{DemoUser, Store, build_registry, context_resolver};
 
-fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
-    let store = Store::seeded();
+fn agent(store: &Store) -> anyhow::Result<Arc<Agent<DemoUser>>> {
     let config = AgentConfig {
         app_instructions: Some(
             "This app is a document workspace: the selected record is always a \
@@ -41,7 +40,7 @@ fn agent() -> anyhow::Result<Arc<Agent<DemoUser>>> {
         ..AgentConfig::default()
     };
     Ok(Arc::new(Agent::with_config(
-        Arc::new(build_registry(&store)),
+        Arc::new(build_registry(store)),
         // OLLAMA_MODEL wins, then ANTHROPIC_API_KEY (+ optional
         // ANTHROPIC_MODEL, e.g. claude-haiku-4-5 for a cheaper run).
         cleverhans::llm::from_env()?,
@@ -64,9 +63,29 @@ impl PrincipalExtractor<DemoUser> for EveryoneIsDemo {
 }
 
 async fn serve() -> anyhow::Result<()> {
+    let store = Store::seeded();
+    let docs_store = store.clone();
     let app = Router::new()
         .route("/", get(|| async { Html(include_str!("chat.html")) }))
-        .merge(agent_router("/agent", agent()?, Arc::new(EveryoneIsDemo)));
+        // Live document list, so frontends render real store state instead
+        // of a client-side seed. CORS-open: demo data, read-only.
+        .route(
+            "/documents",
+            get(move || {
+                let store = docs_store.clone();
+                async move {
+                    (
+                        [("access-control-allow-origin", "*")],
+                        axum::Json(store.documents_json()),
+                    )
+                }
+            }),
+        )
+        .merge(agent_router(
+            "/agent",
+            agent(&store)?,
+            Arc::new(EveryoneIsDemo),
+        ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8787")
         .await
         .context("bind 127.0.0.1:8787")?;
@@ -77,7 +96,7 @@ async fn serve() -> anyhow::Result<()> {
 async fn eval(path: &str) -> anyhow::Result<()> {
     let json = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
     let cases = cleverhans::evals::load_cases(&json).context("parse cases")?;
-    let agent = agent()?;
+    let agent = agent(&Store::seeded())?;
     let principal = DemoUser {
         name: "eval".to_owned(),
     };
