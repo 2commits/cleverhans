@@ -10,8 +10,14 @@
 //! implementation runs the same vectors.
 
 pub mod fixture;
+pub mod host_check;
 pub mod matcher;
+pub mod mock_host;
 pub mod runner;
+pub mod webhook_vector;
 
 pub use fixture::{ExecutionLog, Fixture, Vector, build_agent};
+pub use host_check::{HostCheckTarget, HostVector, run_host_vector};
+pub use mock_host::MockHost;
 pub use runner::run_vector;
+pub use webhook_vector::{ServiceVector, run_agent_vector_via_webhooks, run_service_vector};

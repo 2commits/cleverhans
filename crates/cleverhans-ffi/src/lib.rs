@@ -23,9 +23,8 @@ use cleverhans_core::agent::AgentConfig;
 use cleverhans_core::registry::{Registry, RegistryBuilder};
 use cleverhans_core::schema::{RegistrySchema, SchemaError};
 use cleverhans_core::seams::{ActionHandler, DryRunHandler, LlmProvider, SlotBuilder};
-use cleverhans_llm_anthropic::{AnthropicConfig, AnthropicProvider};
-use cleverhans_llm_ollama::{OllamaConfig, OllamaProvider};
 
+pub use cleverhans::llm::LlmSpec;
 pub use cleverhans_conformance::fixture::{DeclarativeSlots, LlmItem, ScriptedLlm, SlotScript};
 pub use cleverhans_ws_core::{EventSink, FrameOutcome, FramePump};
 
@@ -49,58 +48,14 @@ pub enum FfiError {
     Llm(String),
 }
 
-/// Declarative LLM provider selection, deserialized from the host's config
-/// object. `scripted` powers conformance and smoke tests without an API key.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
-pub enum LlmSpec {
-    /// Anthropic Messages API.
-    Anthropic {
-        /// API key — the agent's only credential (spec §12.1).
-        api_key: String,
-        /// Model ID override.
-        #[serde(default)]
-        model: Option<String>,
-    },
-    /// Local Ollama daemon (zero egress).
-    Ollama {
-        /// Model name known to the daemon.
-        model: String,
-        /// Daemon origin override.
-        #[serde(default)]
-        base_url: Option<String>,
-    },
-    /// Deterministic scripted output (tests, conformance vectors): one item
-    /// list per LLM invocation, same encoding as the vector format.
-    Scripted {
-        /// The scripted turns.
-        script: Vec<Vec<LlmItem>>,
-    },
-}
-
-/// Builds a provider from a spec.
+/// Builds a provider from a spec (single home: `cleverhans::llm`). The
+/// `Result` wrapper is kept for binding-crate call-site stability.
 ///
 /// # Errors
 ///
-/// [`FfiError::Llm`] on invalid spec content.
+/// None today; reserved for spec content validation.
 pub fn build_llm(spec: LlmSpec) -> Result<Arc<dyn LlmProvider>, FfiError> {
-    Ok(match spec {
-        LlmSpec::Anthropic { api_key, model } => {
-            let mut config = AnthropicConfig::new(api_key);
-            if let Some(model) = model {
-                config.model = model;
-            }
-            Arc::new(AnthropicProvider::new(config))
-        }
-        LlmSpec::Ollama { model, base_url } => {
-            let mut config = OllamaConfig::new(model);
-            if let Some(base_url) = base_url {
-                config.base_url = base_url;
-            }
-            Arc::new(OllamaProvider::new(config))
-        }
-        LlmSpec::Scripted { script } => Arc::new(ScriptedLlm::new(&script)),
-    })
+    Ok(cleverhans::llm::build_llm(spec))
 }
 
 /// Parses the host-facing agent-config document (`app_instructions`,

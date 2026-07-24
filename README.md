@@ -11,7 +11,9 @@ your credentials, and never fills in parameters your app already knows.
 
 One Rust core powers every binding: host the agent from **Rust**, **Node.js**,
 or **Python** (prebuilt binaries — no Rust toolchain needed for Node/Python),
-and drop the chat UI into **React**.
+or from **any other language** by running `cleverhans serve` next to your
+backend and implementing four webhook endpoints. Drop the chat UI into
+**React** either way.
 
 ## See it in two minutes
 
@@ -131,6 +133,19 @@ let app = Router::new()
     .layer(my_auth_layer);   // full walkthrough in docs/quickstart-rust.md
 ```
 
+**Any other language** — `cargo install cleverhans-serve` (or grab a
+release binary). Run the agent as a standalone service and implement four
+HTTP endpoints (`verify_session`, `authorize`, `dry_run`, `execute`) in Go,
+Java, C#, PHP, … — your app keeps execution, permissions, and auth; the
+service keeps the model. `cleverhans host-check` verifies your endpoints
+against the spec's conformance vectors. Walkthrough:
+[docs/hosting-webhooks.md](docs/hosting-webhooks.md).
+
+```sh
+CLEVERHANS_UPSTREAM_SECRET=... ANTHROPIC_API_KEY=... \
+  cleverhans serve --registry registry.json --config cleverhans.toml
+```
+
 Every `mutates: true` action requires a dry-run — the side-effect-free
 preview users confirm against. The framework refuses to build without one.
 
@@ -201,6 +216,7 @@ that all three bindings pass — every host behaves identically.
 | [Rust quickstart](docs/quickstart-rust.md) | Mount into an existing axum app |
 | [Node.js quickstart](docs/quickstart-node.md) | Host from any Node WebSocket server |
 | [Python quickstart](docs/quickstart-python.md) | FastAPI recipe |
+| [Webhook hosting](docs/hosting-webhooks.md) | Any language: `cleverhans serve` + four endpoints |
 | [React quickstart](docs/quickstart-react.md) | Styled drop-in or headless hooks |
 | [Adding an action](docs/adding-actions.md) | Registry edit → codegen → handlers → UI → evals |
 | [Architecture](docs/architecture.md) | How the one Rust core sits under every binding |

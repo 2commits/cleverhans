@@ -1,0 +1,19 @@
+{
+  "name": "authorize_allow",
+  "description": "§14.4: an authorize call for a permitted action returns 200 with an allow decision.",
+  "spec": ["14.4"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "requests": [
+    { "endpoint": "verify_session", "auth": "valid",
+      "body": { "webhook_version": 1, "session_id": "s_hostcheck_2",
+                "headers": { "authorization": "Bearer host-check-user" } },
+      "expect": { "status": 200, "body": { "principal": { "$bind": "PRIN" } } } },
+    { "endpoint": "authorize", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "authorize", "session_id": "s_hostcheck_2",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "$ref": "PRIN" } },
+      "expect": { "status": 200, "body": { "decision": "allow" } } }
+  ]
+}

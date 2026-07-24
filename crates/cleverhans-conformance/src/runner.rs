@@ -24,7 +24,7 @@ pub async fn run_vector(fixture: &Fixture, vector: &Vector) -> Result<(), String
 /// Drops non-normative events before matching: `done: false` chat deltas
 /// (spec §6.3 — delta count is implementation detail) and any
 /// vector-ignored types.
-fn normalize(events: Vec<Value>, vector: &Vector) -> Vec<Value> {
+pub(crate) fn normalize(events: Vec<Value>, vector: &Vector) -> Vec<Value> {
     events
         .into_iter()
         .filter(|event| {

@@ -73,6 +73,6 @@ jobs:
       # exactly what `cargo publish` will do at release time.
       - run: >
           cargo package --workspace
-          --exclude cleverhans-conformance --exclude cleverhans-ffi
+          --exclude cleverhans-ffi
           --exclude cleverhans-py --exclude cleverhans-node
           --exclude cleverhans-demo

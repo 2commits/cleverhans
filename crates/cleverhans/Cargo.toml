@@ -22,6 +22,7 @@ test-util = ["cleverhans-core/test-util"]
 
 [dependencies]
 cleverhans-core = { workspace = true }
+serde = { workspace = true }
 cleverhans-evals = { workspace = true, optional = true }
 cleverhans-llm-anthropic = { workspace = true, optional = true }
 cleverhans-llm-ollama = { workspace = true, optional = true }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/authorize.response.json",
+  "title": "authorize 200 response (SPEC.md §14.4)",
+  "description": "Deny is a successful delivery, hence 200. Any non-200, timeout, or malformed body is treated as deny (fail closed).",
+  "type": "object",
+  "required": ["decision"],
+  "properties": {
+    "decision": { "enum": ["allow", "deny"] },
+    "reason": {
+      "type": "string",
+      "description": "Optional with deny; surfaced in validation failures."
+    }
+  }
+}

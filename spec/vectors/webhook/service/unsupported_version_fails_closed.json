@@ -1,0 +1,20 @@
+{
+  "name": "unsupported_version_fails_closed",
+  "description": "§14.2: a host that rejects the contract version (400 unsupported_webhook_version) is fatal misconfiguration — verify_session fails closed and the stream is refused 503, not degraded.",
+  "spec": ["14.2", "14.3"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret" },
+  "llm": [],
+  "host": {
+    "verify_session": [ { "respond": { "status": 400,
+      "body": { "error": "unsupported_webhook_version", "supported": [2] } } } ]
+  },
+  "steps": [
+    { "connect": {} },
+    { "expect_connect": { "status": 503 } }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session" }
+  ]
+}

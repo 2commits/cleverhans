@@ -1,0 +1,27 @@
+{
+  "name": "execute_idempotent_replay",
+  "description": "§12.14: re-delivery of the same idempotency_key (higher attempt) returns the outcome of the first execution — deep-equal body — and does not execute twice.",
+  "spec": ["12.14", "14.6"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "requests": [
+    { "endpoint": "verify_session", "auth": "valid",
+      "body": { "webhook_version": 1, "session_id": "s_hostcheck_5",
+                "headers": { "authorization": "Bearer host-check-user" } },
+      "expect": { "status": 200, "body": { "principal": { "$bind": "PRIN" } } } },
+    { "endpoint": "execute", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "execute", "session_id": "s_hostcheck_5",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "$ref": "PRIN" },
+                "idempotency_key": "ik_hostcheck_5a", "attempt": 1 },
+      "expect": { "status": 200, "body": { "$bind": "FIRST" } } },
+    { "endpoint": "execute", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "execute", "session_id": "s_hostcheck_5",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "$ref": "PRIN" },
+                "idempotency_key": "ik_hostcheck_5a", "attempt": 2 },
+      "expect": { "status": 200, "body": { "$ref": "FIRST" } } }
+  ]
+}

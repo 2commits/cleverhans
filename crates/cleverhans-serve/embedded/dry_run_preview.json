@@ -1,0 +1,27 @@
+{
+  "name": "dry_run_preview",
+  "description": "§14.5 + §12.7: a dry_run call returns 200 with a preview outcome and MUST NOT mutate anything — replaying it yields an equivalent preview.",
+  "spec": ["14.5", "12.7"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "requests": [
+    { "endpoint": "verify_session", "auth": "valid",
+      "body": { "webhook_version": 1, "session_id": "s_hostcheck_3",
+                "headers": { "authorization": "Bearer host-check-user" } },
+      "expect": { "status": 200, "body": { "principal": { "$bind": "PRIN" } } } },
+    { "endpoint": "dry_run", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "dry_run", "session_id": "s_hostcheck_3",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "$ref": "PRIN" } },
+      "expect": { "status": 200,
+                  "body": { "outcome": "preview", "preview": { "$bind": "PREVIEW" } } } },
+    { "endpoint": "dry_run", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "dry_run", "session_id": "s_hostcheck_3",
+                "action_id": "transaction.coBuyer.remove",
+                "params": { "transactionId": "tx_581" },
+                "principal": { "$ref": "PRIN" } },
+      "expect": { "status": 200,
+                  "body": { "outcome": "preview", "preview": { "$ref": "PREVIEW" } } } }
+  ]
+}

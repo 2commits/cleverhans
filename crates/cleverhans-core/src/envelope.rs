@@ -89,6 +89,7 @@ impl ClientEvent {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DryRunPreview {
     /// How many records the action would touch.
+    #[serde(default)]
     pub affected_count: u64,
     /// A bounded sample of affected record identifiers.
     #[serde(default)]

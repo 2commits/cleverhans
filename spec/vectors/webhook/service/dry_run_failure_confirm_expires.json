@@ -1,0 +1,40 @@
+{
+  "name": "dry_run_failure_confirm_expires",
+  "description": "§14.5: dry_run succeeds at propose time but fails at confirm-time revalidation — the proposal expires and execute is never delivered (§12.8 backstop over the wire).",
+  "spec": ["14.5", "7.3", "12.8"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret" },
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "host": {
+    "dry_run": [
+      { "respond": { "status": 200, "body": { "outcome": "preview",
+        "preview": { "affected_count": 1, "sample_ids": ["cb_112"],
+                     "summary": "Remove co-buyer Jane Doe from TX-581" } } } },
+      { "respond": { "status": 500, "body": { "error": "db down" } } }
+    ]
+  },
+  "steps": [
+    { "connect": {} },
+    { "expect_connect": { "status": 101 } },
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581", "view_type": "detail" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [ { "type": "action_proposal", "proposal_id": { "$bind": "P" } } ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" }, "state": "expired" }
+    ] }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session" },
+    { "endpoint": "authorize" },
+    { "endpoint": "dry_run" },
+    { "endpoint": "authorize" },
+    { "endpoint": "dry_run" }
+  ]
+}

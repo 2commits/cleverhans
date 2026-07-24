@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/verify_session.response.json",
+  "title": "verify_session 200 response (SPEC.md §14.3)",
+  "description": "Non-200 statuses are normative behavior, not body schemas: 401/403 refuse the stream with the same status (optional body {\"reason\": string}); anything else refuses with 503.",
+  "type": "object",
+  "required": ["principal"],
+  "properties": {
+    "principal": {
+      "description": "Any JSON value. Stored verbatim for the session and echoed byte-identical on every subsequent webhook call (§12.13). The service never inspects it."
+    }
+  }
+}

@@ -1,0 +1,59 @@
+# Example deployment configuration for `cleverhans serve`.
+#
+#   CLEVERHANS_UPSTREAM_SECRET=... ANTHROPIC_API_KEY=... \
+#     cleverhans serve --registry registry.json --config cleverhans.toml
+#
+# Every section below maps onto the host webhook contract (spec/SPEC.md §14).
+
+[server]
+bind = "127.0.0.1:8789"     # where the WS envelope is served
+path = "/agent"
+
+[upstream]
+base_url = "http://localhost:3000"
+secret_env = "CLEVERHANS_UPSTREAM_SECRET"   # sent as `Authorization: Bearer <value>`
+# danger_allow_remote_http = true           # required for plaintext beyond loopback
+# danger_allow_missing_secret = true        # required to run without a secret
+
+[upstream.timeouts]         # §14.7 defaults, in milliseconds
+# verify_ms = 5000
+# authorize_ms = 5000
+# dry_run_ms = 10000
+# execute_ms = 30000
+
+[upstream.retry]            # execute only; safe under §12.14 idempotency
+# execute_attempts = 3
+# backoff_ms = 200
+
+[auth]
+# Called once per stream establishment with the client's allowlisted
+# headers; returns {"principal": <any JSON>} or 401/403 (§14.3).
+verify = "POST /internal/cleverhans/verify-session"
+forward_headers = ["authorization", "cookie"]
+
+[authz]
+# Called at propose AND confirm time; {"decision":"allow"} unconditionally
+# is a valid trivial implementation (§14.4).
+endpoint = "POST /internal/cleverhans/authorize"
+
+[llm]
+provider = "anthropic"      # anthropic | ollama | scripted
+# model = "claude-sonnet-5"
+# api_key_env = "ANTHROPIC_API_KEY"
+
+[agent]
+# app_instructions = "You help users manage documents."
+# max_validation_retries = 2
+# describe_context = true
+
+# The wildcard template covers every registry action; {action} is
+# substituted with the action ID. Explicit entries override it.
+[actions."*"]
+execute = "POST /internal/cleverhans/{action}/execute"
+dry_run = "POST /internal/cleverhans/{action}/dry-run"
+
+# Per-action slot tables phrase the proposal cards (app-authored, §9.7).
+# [actions."record.archive".slots]
+# title = { const = "Archive record" }
+# detail = { param = "reason" }
+# summary = { preview = "summary" }

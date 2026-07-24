@@ -1,0 +1,45 @@
+{
+  "name": "execute_timeout_retries_idempotently",
+  "description": "§14.6 + §12.14: a delivery timeout on execute is retried with the SAME idempotency_key, an incremented attempt, and a DIFFERENT delivery id; the retry's success lands the proposal in executed exactly once.",
+  "spec": ["14.6", "12.14", "14.2"],
+  "layer": "webhook-service",
+  "fixture": "co-buyer",
+  "service_config": { "secret": "vector-secret" },
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "host": {
+    "execute": [
+      { "timeout": true },
+      { "respond": { "status": 200, "body": { "outcome": "executed", "result": { "removed": true } } } }
+    ]
+  },
+  "steps": [
+    { "connect": {} },
+    { "expect_connect": { "status": 101 } },
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581", "view_type": "detail" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [ { "type": "action_proposal", "proposal_id": { "$bind": "P" } } ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" },
+        "state": "executed", "result": { "$exact": { "removed": true } } }
+    ] }
+  ],
+  "expect_deliveries": [
+    { "endpoint": "verify_session" },
+    { "endpoint": "authorize" },
+    { "endpoint": "dry_run" },
+    { "endpoint": "authorize" },
+    { "endpoint": "dry_run" },
+    { "endpoint": "execute",
+      "headers": { "x-cleverhans-delivery": { "$bind": "D1" } },
+      "body": { "idempotency_key": { "$bind": "IK" }, "attempt": 1 } },
+    { "endpoint": "execute",
+      "headers": { "x-cleverhans-delivery": { "$differs": "D1" } },
+      "body": { "idempotency_key": { "$ref": "IK" }, "attempt": 2 } }
+  ]
+}

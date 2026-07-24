@@ -1,0 +1,13 @@
+{
+  "name": "verify_session_returns_principal",
+  "description": "§14.3: a verify_session call with valid forwarded credentials returns 200 with a principal value.",
+  "spec": ["14.3"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "requests": [
+    { "endpoint": "verify_session", "auth": "valid",
+      "body": { "webhook_version": 1, "session_id": "s_hostcheck_1",
+                "headers": { "authorization": "Bearer host-check-user" } },
+      "expect": { "status": 200, "body": { "principal": { "$bind": "PRIN" } } } }
+  ]
+}

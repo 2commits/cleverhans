@@ -1,0 +1,70 @@
+{
+  "name": "co-buyer",
+  "registry": {
+    "spec_version": "0.1",
+    "blocks": [
+      {
+        "block_type": "confirm",
+        "slots": [
+          { "name": "title", "type": "string", "required": true },
+          { "name": "detail", "type": "string", "required": false }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "transaction.coBuyer.remove",
+        "description": "Remove the co-buyer from the current transaction",
+        "params": [
+          { "name": "transactionId", "type": "string", "source": "context", "required": true }
+        ],
+        "block_type": "confirm",
+        "mutates": true,
+        "authz_key": "transaction.coBuyer.remove"
+      },
+      {
+        "id": "transaction.setCountry",
+        "description": "Set the transaction country",
+        "params": [
+          { "name": "transactionId", "type": "string", "source": "context", "required": true },
+          {
+            "name": "country",
+            "description": "ISO country code",
+            "type": "string",
+            "source": "utterance",
+            "required": true
+          }
+        ],
+        "block_type": "confirm",
+        "mutates": true,
+        "authz_key": "transaction.setCountry"
+      }
+    ],
+    "context_params": {
+      "transactionId": "selected_record_id"
+    }
+  },
+  "scripts": {
+    "transaction.coBuyer.remove": {
+      "handler": { "return": { "removed": true } },
+      "dry_run": {
+        "preview": {
+          "affected_count": 1,
+          "sample_ids": ["cb_112"],
+          "summary": "Remove co-buyer Jane Doe from TX-581"
+        }
+      },
+      "slots": {
+        "title": { "const": "Remove co-buyer" },
+        "detail": { "preview": "summary" }
+      }
+    },
+    "transaction.setCountry": {
+      "handler": { "return": { "updated": true } },
+      "dry_run": { "preview": { "affected_count": 1 } },
+      "slots": {
+        "title": { "const": "Set country" }
+      }
+    }
+  }
+}

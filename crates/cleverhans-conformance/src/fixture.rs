@@ -20,6 +20,10 @@ use cleverhans_core::seams::{
     LlmProvider, SlotBuilder,
 };
 
+// Moved to their single home in `cleverhans-core`; re-exported here so
+// fixture files and downstream re-exports (`cleverhans-ffi`) are unchanged.
+pub use cleverhans_core::declarative::{DeclarativeSlots, LlmItem, SlotScript};
+
 /// The principal every vector runs as. Identity semantics are asserted via
 /// the execution log; authorization is scripted, so no per-user modeling.
 #[derive(Clone)]
@@ -89,19 +93,6 @@ pub enum DryRunScript {
     },
 }
 
-/// One slot value source.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SlotScript {
-    /// A fixed value.
-    Const(Value),
-    /// Copy a filled param.
-    Param(String),
-    /// Copy a dry-run preview field (`"summary"` in v1); omitted when the
-    /// preview or field is absent.
-    Preview(String),
-}
-
 /// `"allow"` or `{"deny": "<reason>"}`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -135,31 +126,6 @@ impl Default for AuthzScript {
     fn default() -> Self {
         Self::Default {
             default: AuthzBehavior::Allow,
-        }
-    }
-}
-
-/// One scripted model-output item — the neutral encoding shared by vectors,
-/// the FFI scripted provider, and host LLM callbacks.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LlmItem {
-    /// Assistant prose.
-    Text(String),
-    /// A tool call.
-    ToolCall {
-        /// Action ID.
-        name: String,
-        /// Utterance arguments.
-        arguments: JsonMap,
-    },
-}
-
-impl From<LlmItem> for CompletionItem {
-    fn from(item: LlmItem) -> Self {
-        match item {
-            LlmItem::Text(text) => Self::Text(text),
-            LlmItem::ToolCall { name, arguments } => Self::ToolCall { name, arguments },
         }
     }
 }
@@ -363,33 +329,6 @@ impl DryRunHandler<VectorPrincipal> for ScriptedDryRun {
             DryRunBehavior::Preview(preview) => Ok(preview.clone()),
             DryRunBehavior::Fail(message) => Err(HandlerError::Rejected(message.clone())),
         }
-    }
-}
-
-/// A [`SlotBuilder`] over a declarative slot → source table — used by
-/// fixtures here and re-exported through `cleverhans-ffi` for hosts that
-/// cannot register synchronous callbacks (Node).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(transparent)]
-pub struct DeclarativeSlots(pub BTreeMap<String, SlotScript>);
-
-impl SlotBuilder for DeclarativeSlots {
-    fn build(&self, params: &JsonMap, preview: Option<&DryRunPreview>) -> JsonMap {
-        let mut slots = JsonMap::new();
-        for (name, script) in &self.0 {
-            let value = match script {
-                SlotScript::Const(value) => Some(value.clone()),
-                SlotScript::Param(param) => params.get(param).cloned(),
-                SlotScript::Preview(field) => match field.as_str() {
-                    "summary" => preview.and_then(|p| p.summary.clone()).map(Value::String),
-                    _ => None,
-                },
-            };
-            if let Some(value) = value {
-                slots.insert(name.clone(), value);
-            }
-        }
-        slots
     }
 }
 
