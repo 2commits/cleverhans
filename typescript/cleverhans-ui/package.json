@@ -1,6 +1,6 @@
 {
   "name": "@cleverhans/ui",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Optional styled block pack and chat window for CleverHans — the 10-minute happy path, never a core dependency",
   "license": "Apache-2.0",
   "repository": {
