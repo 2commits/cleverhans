@@ -20,6 +20,30 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
 
+  # The §14 contract stays implementable from the spec alone: the
+  # dependency-free reference host (no shared code with the framework)
+  # must pass host-check, signatures required.
+  host-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: cargo build -p cleverhans-serve
+      - name: host-check against the reference host
+        run: |
+          CLEVERHANS_SECRET=ci-secret CLEVERHANS_SIGNING_KEY=ci-signing-key \
+            node docs/examples/node-host/host.js &
+          for i in $(seq 1 20); do
+            curl -s -o /dev/null http://127.0.0.1:3000 && break || sleep 0.5
+          done
+          ./target/debug/cleverhans host-check \
+            --base-url http://127.0.0.1:3000 \
+            --secret ci-secret --signing-key ci-signing-key
+
   web:
     runs-on: ubuntu-latest
     defaults:
