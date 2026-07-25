@@ -1,0 +1,31 @@
+  [server]
+  bind = "127.0.0.1:8787"
+
+  [upstream]
+  base_url = "http://127.0.0.1:8791"
+
+  [auth]
+  verify = "POST /cleverhans/verify_session"
+
+  [authz]
+  endpoint = "POST /cleverhans/authorize"
+
+  [llm]
+  provider = "anthropic"
+  model = "claude-haiku-4-5"
+
+  [actions."*"]
+  execute = "POST /cleverhans/execute"
+  dry_run = "POST /cleverhans/dry_run"
+
+  [actions."document.rename"]
+  execute = "POST /cleverhans/execute"
+  dry_run = "POST /cleverhans/dry_run"
+  build_slots = "POST /cleverhans/build_slots"   # ← the thing under test
+
+  [actions."document.publish".slots]
+  title = { const = "Publish document" }
+  [actions."document.archive".slots]
+  title = { const = "Archive document" }
+  [actions."documents.deleteByStatus".slots]
+  title = { const = "Bulk delete documents" }

@@ -291,6 +291,9 @@ pub struct Config {
     /// `[actions]`.
     #[serde(default)]
     pub actions: BTreeMap<String, ActionSection>,
+    /// `[telemetry]` — OTLP metrics export (off unless configured).
+    #[serde(default)]
+    pub telemetry: crate::telemetry::TelemetrySection,
 }
 
 /// Routes and slots resolved for one action.

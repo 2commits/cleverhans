@@ -42,6 +42,13 @@ provider = "anthropic"      # anthropic | ollama | scripted
 # model = "claude-sonnet-5"
 # api_key_env = "ANTHROPIC_API_KEY"
 
+# OTLP metrics export (spec'd metric set in docs/hosting-webhooks.md).
+# Off unless an endpoint is set here or via OTEL_EXPORTER_OTLP_ENDPOINT.
+# [telemetry]
+# otlp_endpoint = "http://localhost:4318"
+# service_name = "cleverhans"
+# export_interval_ms = 10000
+
 [agent]
 # app_instructions = "You help users manage documents."
 # max_validation_retries = 2
