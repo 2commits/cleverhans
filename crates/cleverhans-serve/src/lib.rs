@@ -24,7 +24,9 @@ use cleverhans_core::registry::RegistryBuilder;
 use cleverhans_core::schema::RegistrySchema;
 use cleverhans_core::seams::{DryRunHandler, LlmProvider, SlotBuilder};
 use cleverhans_webhook::client::HostClient;
-use cleverhans_webhook::seams::{WebhookAuthz, WebhookDryRun, WebhookHandler, WebhookVerifier};
+use cleverhans_webhook::seams::{
+    WebhookAuthz, WebhookDryRun, WebhookHandler, WebhookSlots, WebhookVerifier,
+};
 use cleverhans_ws::{AsyncPrincipalExtractor, agent_router_async};
 
 use crate::config::Resolved;
@@ -80,19 +82,32 @@ pub fn build_app(
                 route,
             )) as Arc<dyn DryRunHandler<Value>>
         });
-        builder = builder.attach(
+        let handler = Arc::new(WebhookHandler::new(
+            Arc::clone(&client),
             def.id.clone(),
-            Arc::new(WebhookHandler::new(
-                Arc::clone(&client),
+            action.execute.clone(),
+        )) as Arc<dyn cleverhans_core::seams::ActionHandler<Value>>;
+        // §14.9: a build_slots route wins over the declarative slots table.
+        builder = if let Some(route) = action.build_slots.clone() {
+            let slots = WebhookSlots::new(Arc::clone(&client), def.id.clone(), route);
+            builder.bind(def.id.clone(), move |binding| {
+                let binding = binding.handler(handler).async_slots(slots);
+                match dry_run {
+                    Some(dry_run) => binding.dry_run(dry_run),
+                    None => binding,
+                }
+            })
+        } else {
+            builder.attach(
                 def.id.clone(),
-                action.execute.clone(),
-            )),
-            dry_run,
-            action
-                .slots
-                .clone()
-                .map(|slots| Arc::new(DeclarativeSlots(slots)) as Arc<dyn SlotBuilder>),
-        );
+                handler,
+                dry_run,
+                action
+                    .slots
+                    .clone()
+                    .map(|slots| Arc::new(DeclarativeSlots(slots)) as Arc<dyn SlotBuilder>),
+            )
+        };
     }
     let registry = builder
         .build()

@@ -1,0 +1,21 @@
+{
+  "name": "build_slots_returns_slots",
+  "description": "§14.9 (optional endpoint): a host implementing build_slots returns 200 {\"slots\": {…}} for a valid seam request. Hosts without the endpoint are still conformant — this vector is optional and SKIPs on 404.",
+  "spec": ["14.9"],
+  "layer": "webhook-host",
+  "fixture": "co-buyer",
+  "optional": true,
+  "requests": [
+    { "endpoint": "verify_session", "auth": "valid",
+      "body": { "webhook_version": 1, "session_id": "s_hostcheck_8",
+                "headers": { "authorization": "Bearer host-check-user" } },
+      "expect": { "status": 200, "body": { "principal": { "$bind": "PRIN" } } } },
+    { "endpoint": "build_slots", "auth": "valid",
+      "body": { "webhook_version": 1, "kind": "build_slots", "session_id": "s_hostcheck_8",
+                "action_id": "transaction.setCountry",
+                "params": { "transactionId": "tx_581", "country": "NO" },
+                "principal": { "$ref": "PRIN" },
+                "preview": { "affected_count": 1 } },
+      "expect": { "status": 200, "body": { "slots": { "title": { "$bind": "TITLE" } } } } }
+  ]
+}

@@ -44,6 +44,8 @@ pub enum SeamKind {
     DryRun,
     /// §14.6.
     Execute,
+    /// §14.9.
+    BuildSlots,
 }
 
 /// `authorize` / `dry_run` request body (spec §14.4–14.5).
@@ -83,6 +85,35 @@ pub struct ExecuteRequest {
     pub idempotency_key: String,
     /// 1-based; increments per retry attempt.
     pub attempt: u32,
+}
+
+/// `build_slots` request body (spec §14.9).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildSlotsRequest {
+    /// Always [`WEBHOOK_VERSION`].
+    pub webhook_version: u32,
+    /// Always [`SeamKind::BuildSlots`].
+    pub kind: SeamKind,
+    /// The session this call belongs to.
+    pub session_id: String,
+    /// A registered action ID.
+    pub action_id: String,
+    /// Fully validated, context-filled params.
+    pub params: JsonMap,
+    /// Verbatim echo of the `verify_session` principal.
+    pub principal: Value,
+    /// The §6.4 preview computed for this proposal; `null` for
+    /// non-mutating actions (§9.7: the builder receives the preview).
+    pub preview: Option<DryRunPreview>,
+}
+
+/// `build_slots` 200 response body (spec §14.9). No outcome envelope —
+/// slot building is presentation, not a gate; failures fail closed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildSlotsResponse {
+    /// Slot name → value for the action's block type; MUST pass the block
+    /// slot schema (§7.1 step 4).
+    pub slots: JsonMap,
 }
 
 /// `authorize` 200 response body (spec §14.4).

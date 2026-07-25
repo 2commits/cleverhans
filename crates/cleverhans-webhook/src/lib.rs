@@ -25,5 +25,7 @@ pub use client::{
     ClientConfigError, DeliveryError, ExecuteDelivery, HostClient, HostClientConfig, RetryPolicy,
     Route, Timeouts,
 };
-pub use seams::{WebhookAuthz, WebhookDryRun, WebhookHandler, WebhookVerifier, session_principal};
+pub use seams::{
+    WebhookAuthz, WebhookDryRun, WebhookHandler, WebhookSlots, WebhookVerifier, session_principal,
+};
 pub use wire::WEBHOOK_VERSION;

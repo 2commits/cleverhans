@@ -104,12 +104,21 @@ impl<'a, P> Validator<'a, P> {
             None
         };
 
-        let slots = registration
-            .slot_builder
-            .as_ref()
-            .map_or_else(JsonMap::new, |builder| {
-                builder.build(&params, preview.as_ref())
-            });
+        let slots = if let Some(builder) = registration.async_slots.as_ref() {
+            // §14.9 semantics: a card whose content could not be built is
+            // never rendered — fail closed, like dry-run.
+            builder
+                .build_slots(&params, principal, preview.as_ref())
+                .await
+                .map_err(|err| ValidationFailure::SlotBuild(err.to_string()))?
+        } else {
+            registration
+                .slot_builder
+                .as_ref()
+                .map_or_else(JsonMap::new, |builder| {
+                    builder.build(&params, preview.as_ref())
+                })
+        };
         let Some(block) = self.registry.block(&def.block_type) else {
             // Unreachable per registry build invariants; fail closed.
             return Err(ValidationFailure::InvalidSlot {
@@ -445,6 +454,122 @@ mod tests {
                 result.unwrap_err(),
                 ValidationFailure::Unauthorized { .. }
             ));
+        }
+
+        /// An [`AsyncSlotBuilder`] that phrases the card from the preview —
+        /// proving the §9.7 ordering (dry-run first) holds on the async path.
+        struct PreviewTitle;
+
+        #[crate::async_trait]
+        impl crate::seams::AsyncSlotBuilder<User> for PreviewTitle {
+            async fn build_slots(
+                &self,
+                _params: &JsonMap,
+                _principal: &User,
+                preview: Option<&DryRunPreview>,
+            ) -> Result<JsonMap, HandlerError> {
+                let mut slots = JsonMap::new();
+                slots.insert(
+                    "title".to_owned(),
+                    json!(format!(
+                        "Affects {}",
+                        preview.map_or(0, |p| p.affected_count)
+                    )),
+                );
+                Ok(slots)
+            }
+        }
+
+        struct FailingSlots;
+
+        #[crate::async_trait]
+        impl crate::seams::AsyncSlotBuilder<User> for FailingSlots {
+            async fn build_slots(
+                &self,
+                _params: &JsonMap,
+                _principal: &User,
+                _preview: Option<&DryRunPreview>,
+            ) -> Result<JsonMap, HandlerError> {
+                Err(HandlerError::Internal("template service down".to_owned()))
+            }
+        }
+
+        fn async_slots_registry(
+            builder: impl crate::seams::AsyncSlotBuilder<User> + 'static,
+        ) -> Registry<User> {
+            let schema = crate::schema::RegistrySchema {
+                spec_version: crate::SPEC_VERSION.to_owned(),
+                blocks: vec![BlockDef {
+                    block_type: "confirm".to_owned(),
+                    slots: vec![SlotSpec {
+                        name: "title".to_owned(),
+                        ty: ValueType::String,
+                        required: true,
+                    }],
+                }],
+                actions: vec![ActionDef {
+                    id: "record.remove".to_owned(),
+                    description: "Remove the selected record".to_owned(),
+                    params: vec![ParamSpec {
+                        name: "recordId".to_owned(),
+                        description: String::new(),
+                        ty: ValueType::String,
+                        source: ParamSource::Context,
+                        required: true,
+                    }],
+                    block_type: "confirm".to_owned(),
+                    mutates: true,
+                    authz_key: "record.remove".to_owned(),
+                }],
+                context_params: Default::default(),
+            };
+            crate::registry::RegistryBuilder::from_schema(schema)
+                .bind("record.remove", |action| {
+                    action
+                        .handler(NoopHandler)
+                        .dry_run(OnePreview)
+                        .async_slots(builder)
+                })
+                .build()
+                .expect("valid registry")
+        }
+
+        #[tokio::test]
+        async fn async_slot_builder_receives_the_preview() {
+            let registry = async_slots_registry(PreviewTitle);
+            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+
+            let validated = validator
+                .validate(
+                    &candidate(JsonMap::new()),
+                    &context_with_selection(),
+                    &User { allowed: true },
+                )
+                .await
+                .expect("valid candidate");
+
+            assert_eq!(validated.slots["title"], json!("Affects 1"));
+        }
+
+        #[tokio::test]
+        async fn async_slot_failure_fails_closed() {
+            let registry = async_slots_registry(FailingSlots);
+            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+
+            let failure = validator
+                .validate(
+                    &candidate(JsonMap::new()),
+                    &context_with_selection(),
+                    &User { allowed: true },
+                )
+                .await
+                .expect_err("slot failure must invalidate");
+
+            assert!(
+                matches!(failure, ValidationFailure::SlotBuild(_)),
+                "got {failure:?}"
+            );
+            assert!(!failure.is_model_fixable());
         }
 
         #[tokio::test]

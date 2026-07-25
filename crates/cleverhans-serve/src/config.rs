@@ -72,6 +72,8 @@ pub struct TimeoutsSection {
     pub dry_run_ms: Option<u64>,
     /// `execute` timeout.
     pub execute_ms: Option<u64>,
+    /// `build_slots` timeout.
+    pub build_slots_ms: Option<u64>,
 }
 
 impl TimeoutsSection {
@@ -84,6 +86,7 @@ impl TimeoutsSection {
             authorize: ms(self.authorize_ms, defaults.authorize),
             dry_run: ms(self.dry_run_ms, defaults.dry_run),
             execute: ms(self.execute_ms, defaults.execute),
+            build_slots: ms(self.build_slots_ms, defaults.build_slots),
         }
     }
 }
@@ -258,6 +261,10 @@ pub struct ActionSection {
     /// `"METHOD /path"` of the dry_run endpoint.
     #[serde(default)]
     pub dry_run: Option<String>,
+    /// `"METHOD /path"` of the optional §14.9 build_slots endpoint; when
+    /// set it wins over the declarative `slots` table.
+    #[serde(default)]
+    pub build_slots: Option<String>,
     /// Declarative slot table (`const` / `param` / `preview` sources).
     #[serde(default)]
     pub slots: Option<BTreeMap<String, SlotScript>>,
@@ -293,6 +300,8 @@ pub struct ResolvedAction {
     pub execute: Route,
     /// Dry-run route (present iff the action mutates).
     pub dry_run: Option<Route>,
+    /// build_slots route (§14.9); wins over `slots` when present.
+    pub build_slots: Option<Route>,
     /// Declarative slots, if configured.
     pub slots: Option<BTreeMap<String, SlotScript>>,
 }
@@ -380,11 +389,17 @@ impl Config {
                     def.id
                 )));
             }
+            let build_slots = template(|section| section.build_slots.as_deref());
             let slots = entry.and_then(|section| section.slots.clone());
-            if let Some(block) = schema
-                .blocks
-                .iter()
-                .find(|b| b.block_type == def.block_type)
+            // With a §14.9 build_slots route the host authors the card at
+            // runtime — required-slot coverage moves to the propose-time
+            // schema check; without one, the declarative table must cover
+            // every required slot up front.
+            if build_slots.is_none()
+                && let Some(block) = schema
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == def.block_type)
             {
                 for slot in &block.slots {
                     if slot.required && !slots.as_ref().is_some_and(|s| s.contains_key(&slot.name))
@@ -402,6 +417,7 @@ impl Config {
                 ResolvedAction {
                     execute: Route::from_str(&execute)?,
                     dry_run: dry_run.as_deref().map(Route::from_str).transpose()?,
+                    build_slots: build_slots.as_deref().map(Route::from_str).transpose()?,
                     slots,
                 },
             );

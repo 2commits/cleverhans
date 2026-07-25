@@ -34,6 +34,9 @@ pub const AUTHORIZE_PATH: &str = "/cleverhans/authorize";
 pub const DRY_RUN_PATH: &str = "/cleverhans/dry_run";
 /// See [`VERIFY_SESSION_PATH`].
 pub const EXECUTE_PATH: &str = "/cleverhans/execute";
+/// See [`VERIFY_SESSION_PATH`]. Served only when the fixture action has a
+/// declarative slot script (§14.9 is optional).
+pub const BUILD_SLOTS_PATH: &str = "/cleverhans/build_slots";
 
 /// The principal the mock host returns when `verify_session` is unscripted.
 #[must_use]
@@ -173,6 +176,7 @@ impl MockHost {
             .route(AUTHORIZE_PATH, post(authorize))
             .route(DRY_RUN_PATH, post(dry_run))
             .route(EXECUTE_PATH, post(execute))
+            .route(BUILD_SLOTS_PATH, post(build_slots))
             .with_state(state);
         let listener = tokio::net::TcpListener::bind(bind)
             .await
@@ -387,6 +391,48 @@ async fn dry_run(State(state): State<Arc<HostState>>, headers: HeaderMap, body: 
         DryRunBehavior::Fail(reason) => json!({"outcome": "rejected", "reason": reason}),
     };
     axum::Json(response).into_response()
+}
+
+/// §14.9: evaluates the fixture's declarative slot script server-side over
+/// the request's params + preview — existing fixtures drive the endpoint
+/// with zero new fixture syntax.
+async fn build_slots(
+    State(state): State<Arc<HostState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    use cleverhans_core::declarative::DeclarativeSlots;
+    use cleverhans_core::envelope::DryRunPreview;
+    use cleverhans_core::seams::SlotBuilder;
+
+    let parsed = parse(&body);
+    if let Err(refusal) = check_headers(&state, &headers, &body) {
+        return *refusal;
+    }
+    let body = parsed;
+    if let Some(response) = record_and_override(&state, "build_slots", &headers, &body).await {
+        return response;
+    }
+    let action_id = body["action_id"].as_str().unwrap_or_default().to_owned();
+    let Some(slots) = state
+        .fixture
+        .scripts
+        .get(&action_id)
+        .and_then(|script| script.slots.clone())
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({"error": format!("no slot script for `{action_id}`")})),
+        )
+            .into_response();
+    };
+    let params = body["params"].as_object().cloned().unwrap_or_default();
+    let preview: Option<DryRunPreview> = body
+        .get("preview")
+        .filter(|value| !value.is_null())
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    let built = DeclarativeSlots(slots).build(&params, preview.as_ref());
+    axum::Json(json!({ "slots": built })).into_response()
 }
 
 async fn execute(State(state): State<Arc<HostState>>, headers: HeaderMap, body: Bytes) -> Response {

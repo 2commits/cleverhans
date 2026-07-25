@@ -41,6 +41,11 @@ pub enum RegistryError {
     /// A [`crate::registry::RegistryBuilder::bind`] never set a handler.
     #[error("binding for `{0}` sets no handler")]
     MissingHandler(String),
+    /// A binding set both [`crate::seams::SlotBuilder`] and
+    /// [`crate::seams::AsyncSlotBuilder`]; an action has exactly one slot
+    /// source.
+    #[error("binding for `{0}` sets both slots and async_slots")]
+    ConflictingSlotBuilders(String),
 }
 
 /// A propose-time or confirm-time validation failure (spec §7.1).
@@ -91,6 +96,10 @@ pub enum ValidationFailure {
     /// permission-correct preview must not be rendered.
     #[error("dry-run failed: {0}")]
     DryRun(String),
+    /// The async slot builder failed (§14.9 fail-closed): a card whose
+    /// content could not be built must not be rendered.
+    #[error("slot build failed: {0}")]
+    SlotBuild(String),
 }
 
 impl ValidationFailure {

@@ -44,11 +44,13 @@ app_instructions = "You are the assistant inside a document-management app. Keep
 execute = "POST /cleverhans/execute"
 dry_run = "POST /cleverhans/dry_run"
 
-# Slot phrasing is service-side config in this topology (§9.7 semantics);
-# the in-process demo's dynamic slot builders are approximated declaratively.
-[actions."document.rename".slots]
-title = { const = "Rename document" }
-detail = { param = "title" }
+# Slot phrasing: document.rename uses the §14.9 build_slots endpoint, so
+# the host's real slot builder phrases the card dynamically ("New title:
+# …") — the other actions show the declarative style.
+[actions."document.rename"]
+execute = "POST /cleverhans/execute"
+dry_run = "POST /cleverhans/dry_run"
+build_slots = "POST /cleverhans/build_slots"
 
 [actions."document.publish".slots]
 title = { const = "Publish document" }

@@ -7,8 +7,9 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use cleverhans_webhook::wire::{
-    AuthorizeResponse, Decision, DryRunResponse, ExecuteRequest, ExecuteResponse, SeamKind,
-    SeamRequest, VerifySessionRequest, VerifySessionResponse, WEBHOOK_VERSION,
+    AuthorizeResponse, BuildSlotsRequest, BuildSlotsResponse, Decision, DryRunResponse,
+    ExecuteRequest, ExecuteResponse, SeamKind, SeamRequest, VerifySessionRequest,
+    VerifySessionResponse, WEBHOOK_VERSION,
 };
 
 fn schema(name: &str) -> Value {
@@ -83,6 +84,21 @@ fn request_bodies_match_the_schema_required_sets() {
         body_keys(&execute),
         required_keys(&schema("execute.request"))
     );
+
+    let build_slots = serde_json::to_value(BuildSlotsRequest {
+        webhook_version: WEBHOOK_VERSION,
+        kind: SeamKind::BuildSlots,
+        session_id: "s_1".to_owned(),
+        action_id: "a.b".to_owned(),
+        params: cleverhans_core::JsonMap::new(),
+        principal: json!({}),
+        preview: None,
+    })
+    .expect("serializes");
+    assert_eq!(
+        body_keys(&build_slots),
+        required_keys(&schema("build_slots.request"))
+    );
 }
 
 #[test]
@@ -120,4 +136,8 @@ fn response_bodies_deserialize_from_schema_shaped_documents() {
             result: Value::Null
         }
     ));
+
+    let build_slots: BuildSlotsResponse =
+        serde_json::from_value(json!({"slots": {"title": "Rename"}})).expect("slots response");
+    assert_eq!(build_slots.slots["title"], json!("Rename"));
 }

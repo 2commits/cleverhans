@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/build_slots.request.json",
+  "title": "build_slots request (SPEC.md §14.9)",
+  "type": "object",
+  "required": ["webhook_version", "kind", "session_id", "action_id", "params", "principal", "preview"],
+  "additionalProperties": false,
+  "properties": {
+    "webhook_version": { "const": 1 },
+    "kind": { "const": "build_slots" },
+    "session_id": { "type": "string" },
+    "action_id": { "type": "string" },
+    "params": {
+      "type": "object",
+      "description": "Fully validated, context-filled params — exactly what §9.7 receives in-process."
+    },
+    "principal": {
+      "description": "Verbatim echo of the verify_session principal (§12.13)."
+    },
+    "preview": {
+      "description": "The §6.4 DryRunPreview computed for this proposal, or null for non-mutating actions (§9.7: the builder receives the preview).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "properties": {
+            "affected_count": { "type": "integer", "default": 0 },
+            "sample_ids": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "summary": { "type": ["string", "null"] },
+            "extensions": { "type": "object", "default": {} }
+          }
+        }
+      ]
+    }
+  }
+}

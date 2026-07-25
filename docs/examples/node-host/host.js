@@ -112,6 +112,28 @@ const handlers = {
     }
   },
 
+  // Optional §14.9: host-authored dynamic slot content. Only wired for the
+  // action that benefits; the service falls back to its declarative slot
+  // tables for everything else.
+  build_slots(body) {
+    const state = stateFor(body.session_id);
+    switch (body.action_id) {
+      case "transaction.setCountry":
+        return {
+          status: 200,
+          body: {
+            slots: {
+              title: "Set country",
+              detail: `${state.country} → ${body.params.country}`,
+            },
+          },
+        };
+      default:
+        // 404 on unconfigured actions: build_slots is per-action opt-in.
+        return { status: 404, body: { error: `no build_slots for \`${body.action_id}\`` } };
+    }
+  },
+
   // Do it — idempotent on idempotency_key (§12.14, the one non-negotiable).
   execute(body) {
     const key = body.idempotency_key;

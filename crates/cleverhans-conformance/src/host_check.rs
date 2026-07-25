@@ -99,8 +99,23 @@ pub struct HostVector {
     pub layer: String,
     /// The fixture whose semantics the host is seeded with.
     pub fixture: String,
+    /// Optional-endpoint vector (e.g. §14.9 build_slots): a `404` anywhere
+    /// in it means SKIP, not FAIL — hosts without the endpoint stay
+    /// conformant.
+    #[serde(default)]
+    pub optional: bool,
     /// Ordered request/response pairs.
     pub requests: Vec<HostRequest>,
+}
+
+/// How a vector concluded (when it didn't fail).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostCheckOutcome {
+    /// Every request matched.
+    Passed,
+    /// An optional vector hit a `404` — the host doesn't implement the
+    /// endpoint, which is conformant.
+    Skipped(String),
 }
 
 /// Replays one vector against the target.
@@ -108,7 +123,10 @@ pub struct HostVector {
 /// # Errors
 ///
 /// A report naming the failing request index and mismatch.
-pub async fn run_host_vector(target: &HostCheckTarget, vector: &HostVector) -> Result<(), String> {
+pub async fn run_host_vector(
+    target: &HostCheckTarget,
+    vector: &HostVector,
+) -> Result<HostCheckOutcome, String> {
     let client = reqwest::Client::new();
     let mut bindings = Bindings::default();
     let base = target.base_url.trim_end_matches('/');
@@ -147,8 +165,15 @@ pub async fn run_host_vector(target: &HostCheckTarget, vector: &HostVector) -> R
             .send()
             .await
             .map_err(|err| format!("request {index} ({url}): {err}"))?;
-        let status = Value::from(response.status().as_u16());
+        let raw_status = response.status().as_u16();
         let text = response.text().await.unwrap_or_default();
+        if vector.optional && raw_status == 404 {
+            return Ok(HostCheckOutcome::Skipped(format!(
+                "endpoint `{}` not implemented (optional)",
+                request.endpoint
+            )));
+        }
+        let status = Value::from(raw_status);
 
         match_value(
             &request.expect.status,
@@ -170,7 +195,7 @@ pub async fn run_host_vector(target: &HostCheckTarget, vector: &HostVector) -> R
             .map_err(|err| format!("request {index}: {err}"))?;
         }
     }
-    Ok(())
+    Ok(HostCheckOutcome::Passed)
 }
 
 /// Deterministic per-request delivery IDs (this replayer asserts host

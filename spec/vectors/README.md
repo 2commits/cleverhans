@@ -89,8 +89,10 @@ format extends the agent-layer case format:
 
 - `service_config` — deployment config the runner applies to the service
   under test: `{"secret": "<service-secret>", "forward_headers": [..]?,
-  "signing_key": "<hmac-key>"?}`. With `signing_key` set, the mock host
-  REQUIRES a valid §14.2 signature on every delivery.
+  "signing_key": "<hmac-key>"?, "build_slots": bool?}`. With `signing_key`
+  set, the mock host REQUIRES a valid §14.2 signature on every delivery.
+  With `build_slots` set, every action's slots come from the §14.9 endpoint
+  instead of local declarative configuration.
 - `host` — per-endpoint response scripts, keyed `verify_session` /
   `authorize` / `dry_run` / `execute`. Each is an array indexed by call
   count (or `{"sequence": [...], "then": <entry>}`), entries:
@@ -119,6 +121,10 @@ named fixture. `requests` is an ordered list:
 
 - `{"endpoint", "auth": "valid" | "invalid" | "none", "webhook_version"?,
    "body", "expect": {"status", "body"?}}`
+- A vector may set top-level `"optional": true` (endpoints a host MAY
+  implement, e.g. §14.9 `build_slots`): if any request in it gets a `404`,
+  the runner reports SKIP instead of FAIL — hosts without the endpoint stay
+  conformant.
 - `auth` selects the `Authorization` bearer: the configured secret, a wrong
   value, or absent. `webhook_version` overrides the
   `X-CleverHans-Webhook-Version` header (default 1).
