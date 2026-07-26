@@ -29,6 +29,7 @@ struct HostState {
 /// Runs the webhook host until ctrl-c.
 pub async fn host(bind: &str, secret: String) -> anyhow::Result<()> {
     let store = Store::seeded();
+    let docs_store = store.clone();
     let state = Arc::new(HostState {
         registry: build_registry(&store),
         secret,
@@ -40,6 +41,20 @@ pub async fn host(bind: &str, secret: String) -> anyhow::Result<()> {
         .route("/cleverhans/dry_run", post(dry_run))
         .route("/cleverhans/execute", post(execute))
         .route("/cleverhans/build_slots", post(build_slots))
+        // Live document list for frontends (playground fetches this instead
+        // of its client-side seed). CORS-open: demo data, read-only.
+        .route(
+            "/documents",
+            axum::routing::get(move || {
+                let store = docs_store.clone();
+                async move {
+                    (
+                        [("access-control-allow-origin", "*")],
+                        axum::Json(store.documents_json()),
+                    )
+                }
+            }),
+        )
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(

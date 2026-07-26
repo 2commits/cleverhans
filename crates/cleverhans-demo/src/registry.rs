@@ -50,6 +50,16 @@ impl DocStatus {
             _ => None,
         }
     }
+
+    /// Lowercase wire form, matching the registry's `string_enum` values
+    /// and the playground's `Doc.status` type.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Published => "published",
+            Self::Archived => "archived",
+        }
+    }
 }
 
 /// Shared in-memory document store.
@@ -84,6 +94,22 @@ impl Store {
 
     fn title_of(&self, id: &str) -> Option<String> {
         self.with(|docs| docs.iter().find(|d| d.id == id).map(|d| d.title.clone()))
+    }
+
+    /// The store as `GET /documents` JSON, so frontends render live state
+    /// instead of a client-side seed.
+    pub fn documents_json(&self) -> serde_json::Value {
+        self.with(|docs| {
+            docs.iter()
+                .map(|doc| {
+                    json!({
+                        "id": doc.id,
+                        "title": doc.title,
+                        "status": doc.status.as_str(),
+                    })
+                })
+                .collect()
+        })
     }
 }
 

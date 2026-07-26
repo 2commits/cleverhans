@@ -14,3 +14,4 @@ typescript/cleverhans-node/index.js
 typescript/cleverhans-node/index.d.ts
 python/cleverhans-hitl/src/cleverhans_agent/_native.abi3.so
 typescript/cleverhans-node/npm/
+local.toml

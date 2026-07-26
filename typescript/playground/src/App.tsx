@@ -11,9 +11,11 @@
  * utterance targets whichever document you're standing on — and single-doc
  * actions fail validation from the list view, where nothing is selected.
  *
- * The doc list mirrors the demo server's seed and folds executed proposal
- * results back in, so renames/publishes/deletes show up on the page.
- * Restart the server to reset both sides.
+ * The doc list is fetched live from the backend (`GET /documents`) on load,
+ * then folds this session's executed proposal results in, so
+ * renames/publishes/deletes show up on the page and reloads can't drift
+ * from real store state. Against `cleverhans serve`, point the fetch at the
+ * demo host: VITE_DOCS_URL=http://127.0.0.1:8791/documents
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -37,12 +39,20 @@ interface Doc {
   status: "draft" | "published" | "archived";
 }
 
-/** Mirror of the demo server's seeded store. */
+/** Fallback mirror of the demo server's seed, used only when the live
+ * `GET /documents` fetch fails (e.g. nothing running yet). */
 const SEED: Doc[] = [
   { id: "doc-1", title: "Q3 Planning", status: "draft" },
   { id: "doc-2", title: "Launch Checklist", status: "draft" },
   { id: "doc-3", title: "Retro Notes", status: "published" },
 ];
+
+/** Where the live document list lives. In-process demo serves it beside the
+ * WS mount (port 8787); against `cleverhans serve`, point this at the demo
+ * host instead: VITE_DOCS_URL=http://127.0.0.1:8791/documents */
+const DOCS_URL: string =
+  (import.meta as { env?: Record<string, string> }).env?.VITE_DOCS_URL ??
+  "http://127.0.0.1:8787/documents";
 
 function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
@@ -155,7 +165,25 @@ export default function App() {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const docs = applyResults(SEED, snapshot.proposals);
+  // Live baseline from the backend, so the page can't drift from the store
+  // across sessions; SEED only covers "nothing is running yet".
+  const [baseline, setBaseline] = useState<Doc[]>(SEED);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(DOCS_URL)
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((docs: Doc[]) => {
+        if (!cancelled) setBaseline(docs);
+      })
+      .catch(() => {
+        console.warn(`playground: ${DOCS_URL} unreachable — rendering the static seed`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const docs = applyResults(baseline, snapshot.proposals);
   const selected = docs.find((doc) => doc.id === selectedId);
 
   // Context follows navigation: the agent always knows where the user is.
