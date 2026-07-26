@@ -113,18 +113,19 @@ enum Command {
     },
 }
 
-fn init_tracing() {
+fn init_tracing(metrics_layer: Option<cleverhans_serve::telemetry::MetricsLayer>) {
     use tracing_subscriber::EnvFilter;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(tracing_subscriber::fmt::layer())
+        .with(metrics_layer)
         .init();
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing();
     match Cli::parse().command {
         Command::Serve {
             registry,
@@ -135,13 +136,19 @@ async fn main() -> anyhow::Result<()> {
             base_url,
             secret,
             signing_key,
-        } => host_check(&base_url, &secret, signing_key.as_deref()).await,
+        } => {
+            init_tracing(None);
+            host_check(&base_url, &secret, signing_key.as_deref()).await
+        }
         Command::MockHost {
             bind,
             secret,
             fixture,
             signing_key,
-        } => mock_host(&bind, &secret, fixture.as_deref(), signing_key.as_deref()).await,
+        } => {
+            init_tracing(None);
+            mock_host(&bind, &secret, fixture.as_deref(), signing_key.as_deref()).await
+        }
     }
 }
 
@@ -152,6 +159,15 @@ async fn serve(registry: &PathBuf, config: &PathBuf, bind: Option<String>) -> an
     let config_text = std::fs::read_to_string(config)
         .with_context(|| format!("read config {}", config.display()))?;
     let parsed = Config::from_toml(&config_text)?;
+    // Telemetry before the subscriber: the metrics layer converts the lib
+    // crates' telemetry events; the guard flushes on shutdown.
+    let telemetry =
+        cleverhans_serve::telemetry::init(&parsed.telemetry).map_err(anyhow::Error::msg)?;
+    let (_telemetry_guard, metrics_layer) = match telemetry {
+        Some((guard, layer)) => (Some(guard), Some(layer)),
+        None => (None, None),
+    };
+    init_tracing(metrics_layer);
     let mut resolved = parsed.resolve(&schema)?;
     if let Some(bind) = bind {
         resolved.bind = bind;

@@ -488,6 +488,13 @@ impl<P: Send + Sync> Agent<P> {
                     role: ChatRole::Tool,
                     content: format!("proposal rejected by validation: {failure}. {guidance}"),
                 });
+                tracing::info!(
+                    target: "cleverhans::telemetry::proposal",
+                    action_id = candidate.action_id.as_str(),
+                    state = "invalid",
+                    reason = %failure,
+                    "proposal state"
+                );
                 return Err(failure);
             }
         };
@@ -517,6 +524,12 @@ impl<P: Send + Sync> Agent<P> {
             role: ChatRole::Tool,
             content: format!("proposed `{action_id}` as `{proposal_id}`, awaiting user decision"),
         });
+        tracing::info!(
+            target: "cleverhans::telemetry::proposal",
+            action_id = action_id.as_str(),
+            state = "validated",
+            "proposal state"
+        );
         Ok(ServerEvent::ActionProposal(proposal))
     }
 
@@ -571,6 +584,13 @@ impl<P: Send + Sync> Agent<P> {
             .validate(&candidate, &session.context, &session.principal)
             .await;
         let expired = |reason: String, session: &mut Session<P>| {
+            tracing::info!(
+                target: "cleverhans::telemetry::proposal",
+                action_id = proposal.action_id.as_str(),
+                state = "expired",
+                reason = reason.as_str(),
+                "proposal state"
+            );
             let _ = session
                 .proposals
                 .transition(proposal_id, ProposalState::Expired);
@@ -601,6 +621,13 @@ impl<P: Send + Sync> Agent<P> {
             Ok(value) => (ProposalState::Executed, None, Some(value)),
             Err(err) => (ProposalState::Failed, Some(err.to_string()), None),
         };
+        tracing::info!(
+            target: "cleverhans::telemetry::proposal",
+            action_id = proposal.action_id.as_str(),
+            state = %state,
+            reason = reason.as_deref().unwrap_or(""),
+            "proposal state"
+        );
         let _ = session.proposals.transition(proposal_id, state);
         session.history.push(ChatTurn {
             role: ChatRole::Tool,
@@ -630,6 +657,11 @@ impl<P: Send + Sync> Agent<P> {
             .transition(proposal_id, ProposalState::Rejected)
         {
             Ok(state) => {
+                tracing::info!(
+                    target: "cleverhans::telemetry::proposal",
+                    state = "rejected",
+                    "proposal state"
+                );
                 session.history.push(ChatTurn {
                     role: ChatRole::Tool,
                     content: format!(

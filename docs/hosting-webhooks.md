@@ -179,6 +179,39 @@ const session = new AgentSession(
 Nothing else changes — `@cleverhans/react` and `@cleverhans/ui` speak the
 same envelope to the service that they speak to an in-process host.
 
+## Telemetry (OTEL metrics)
+
+Off by default; enable with an OTLP endpoint (config or the standard env):
+
+```toml
+[telemetry]
+otlp_endpoint = "http://localhost:4318"   # or OTEL_EXPORTER_OTLP_ENDPOINT
+service_name = "cleverhans"               # default
+export_interval_ms = 10000                # default
+```
+
+Metrics pushed via OTLP http/protobuf (Prometheus users: scrape through a
+collector). Quick local look:
+`docker run -p 4318:4318 otel/opentelemetry-collector` with the debug
+exporter, point `otlp_endpoint` at it.
+
+| Metric | Type | Attributes |
+|---|---|---|
+| `cleverhans.proposals` | counter | `state` (validated/invalid/executed/failed/expired/rejected), `action_id` |
+| `cleverhans.webhook.deliveries` | counter | `endpoint`, `outcome` (ok/status_4xx/status_5xx/unreachable) |
+| `cleverhans.webhook.delivery.duration` | histogram (ms) | `endpoint` |
+| `cleverhans.webhook.execute.retries` | counter | — |
+| `cleverhans.sessions.active` | up-down counter | — |
+| `cleverhans.sessions.duration` | histogram (ms) | — |
+| `cleverhans.llm.requests` | counter | `outcome` |
+| `cleverhans.llm.duration` | histogram (ms) | — |
+
+Under the hood the framework crates emit the same signals as structured
+`tracing` events under `cleverhans::telemetry::*` targets — in-process
+(Rust/Node/Python) integrators get them in their logs with no OTEL
+involved, and can convert them with their own subscriber if they want
+metrics without serve.
+
 ## Security posture (spec §12.11–12.14)
 
 - The webhook endpoints are **execution surface**: never expose them to end
