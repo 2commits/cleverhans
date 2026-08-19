@@ -84,6 +84,16 @@ pub enum ValidationFailure {
         /// Reason supplied by the app's authz resolver.
         reason: String,
     },
+    /// The mandate seam denied the action (spec §9.8): the principal may
+    /// well be authorized, but the user never delegated this action to the
+    /// agent.
+    #[error("outside the agent's mandate for `{action_id}`: {reason}")]
+    OutOfMandate {
+        /// The denied action.
+        action_id: String,
+        /// Reason supplied by the app's mandate.
+        reason: String,
+    },
     /// A slot value failed the block type's slot schema.
     #[error("slot `{slot}`: {reason}")]
     InvalidSlot {
@@ -106,8 +116,9 @@ impl ValidationFailure {
     /// Whether a different model output could fix this failure.
     ///
     /// Selection and argument mistakes are worth a bounded retry; denials
-    /// and app-side failures (authz, unresolvable context, dry-run, slots)
-    /// are not — no rephrasing makes an unauthorized action authorized.
+    /// and app-side failures (authz, mandate, unresolvable context, dry-run,
+    /// slots) are not — no rephrasing makes an unauthorized action
+    /// authorized or widens the agent's mandate.
     #[must_use]
     pub fn is_model_fixable(&self) -> bool {
         matches!(
