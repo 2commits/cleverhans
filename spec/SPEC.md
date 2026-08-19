@@ -100,6 +100,7 @@ Each registry entry carries:
 | `authz` | authz reference | Permission requirement, checked against the principal via the authz seam (§9.3). |
 | `handler` | handler reference | Backend-side executor (§9.2). Not part of the wire contract. |
 | `dry_run` | handler reference, optional | Backend-side preview computation (§9.2). REQUIRED when `mutates` is true. |
+| `display` | display metadata, optional | Human-facing presentation for palettes/launchers (§4.3). The agent MUST ignore it. |
 
 `handler` and `dry_run` are registry-resident but backend-private: they never cross the
 envelope.
@@ -130,6 +131,30 @@ identity**. The model MUST NOT emit lists of record IDs. For bulk operations the
 takes a predicate parameter (e.g. `deleteByPredicate(...)`) and the app evaluates the
 predicate under the user's own data-access rules (RLS or equivalent) to find matches —
 surfaced to the user via dry-run preview (§7.2).
+
+### 4.3 Display metadata (non-normative)
+
+The registry tells the model what it may propose; `display` tells the *user* the same
+thing. Without it, every embedding app rebuilds a parallel action catalog for its
+command palette and the two documents drift (observed in practice: a palette entry
+with no registry counterpart, and titles diverging between proposal cards and menus).
+
+`display` is optional per action and carries: `title` (short imperative label),
+`description` (human-facing outcome, distinct from the model-facing `description` —
+the two legitimately diverge and MUST NOT be conflated), `keywords` (extra palette
+match surface), `group` (app-defined grouping key), and `tags` (free-form badges,
+e.g. `ai`).
+
+Rules:
+
+- The agent MUST ignore `display` entirely; it never enters prompts or tool
+  definitions. The model-facing `description` remains the only intent-matching surface.
+- An action without `display` has no palette presence. This is deliberate:
+  model-facing descriptions make poor and often misleading search surfaces.
+- Reference implementations SHOULD ship a palette matcher over `display` (the Rust
+  lib's `palette::match_actions`: prefix-token match — every query token must prefix a
+  word of the title or a keyword, case-insensitive) so palettes behave identically
+  across frontends.
 
 ## 5. Intent resolution
 

@@ -311,6 +311,7 @@ mod tests {
                     block_type: "confirm".to_owned(),
                     mutates: true,
                     authz_key: "record.remove".to_owned(),
+                    display: None,
                 },
                 Arc::new(NoopHandler),
                 Some(Arc::new(OnePreview)),
@@ -520,6 +521,7 @@ mod tests {
                     block_type: "confirm".to_owned(),
                     mutates: true,
                     authz_key: "record.remove".to_owned(),
+                    display: None,
                 }],
                 context_params: Default::default(),
             };

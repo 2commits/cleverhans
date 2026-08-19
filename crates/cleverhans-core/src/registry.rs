@@ -176,6 +176,37 @@ pub struct ActionDef {
     pub mutates: bool,
     /// Opaque permission key handed to the app's authz resolver.
     pub authz_key: String,
+    /// Human-facing presentation for launchers/palettes (spec §4.3,
+    /// non-normative). The agent never reads it; `description` above stays
+    /// the model's intent-matching surface. Absent = the action has no
+    /// palette presence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<DisplayDef>,
+}
+
+/// How an action presents to humans in a command palette or launcher —
+/// the discoverability counterpart of `description` (which is written for
+/// the model, not the user). Kept separate on purpose: the two texts
+/// legitimately diverge ("Use when the user says to kick off…" vs "The full
+/// flow: hardware, 1:1s, tools — tracked step by step").
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayDef {
+    /// Short imperative label ("Generate onboarding brief").
+    pub title: String,
+    /// One-line human description of the outcome.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// Extra match surface for palette search beyond the title's words.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+    /// Optional grouping key (lifecycle stage, feature area) — apps define
+    /// the vocabulary and ordering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Free-form badges the app renders (e.g. "ai" for LLM-backed actions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// A registered action: wire-visible definition plus backend-private
@@ -416,7 +447,7 @@ impl<P> RegistryBuilder<P> {
     /// #     actions: vec![cleverhans_core::registry::ActionDef {
     /// #         id: "doc.publish".to_owned(), description: "publish".to_owned(),
     /// #         params: vec![], block_type: "confirm".to_owned(),
-    /// #         mutates: true, authz_key: "doc.publish".to_owned() }],
+    /// #         mutates: true, authz_key: "doc.publish".to_owned(), display: None }],
     /// #     context_params: Default::default(),
     /// # };
     ///
@@ -620,6 +651,7 @@ mod tests {
             block_type: "confirm".to_owned(),
             mutates,
             authz_key: "test".to_owned(),
+            display: None,
         }
     }
 

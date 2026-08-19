@@ -23,6 +23,7 @@ pub mod agent;
 pub mod declarative;
 pub mod envelope;
 pub mod error;
+pub mod palette;
 pub mod proposal;
 pub mod registry;
 pub mod schema;

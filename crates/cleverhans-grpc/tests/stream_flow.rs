@@ -134,6 +134,7 @@ fn agent() -> Arc<Agent<User>> {
                 block_type: "confirm".to_owned(),
                 mutates: true,
                 authz_key: "tx.cobuyer.remove".to_owned(),
+                display: None,
             },
             Arc::new(OkHandler),
             Some(Arc::new(OnePreview)),
