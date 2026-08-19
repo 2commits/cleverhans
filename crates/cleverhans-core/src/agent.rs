@@ -14,7 +14,7 @@ use crate::proposal::{ConfirmedProposal, ProposalState, ProposalStore};
 use crate::registry::Registry;
 use crate::seams::{
     AuthzResolver, ChatRole, ChatTurn, CompletionChunk, CompletionRequest, ContextParamResolver,
-    LlmProvider,
+    LlmProvider, Mandate, NoMandate,
 };
 use crate::validation::{CandidateAction, ValidatedAction, Validator};
 
@@ -123,6 +123,7 @@ pub struct Agent<P> {
     registry: Arc<Registry<P>>,
     llm: Arc<dyn LlmProvider>,
     authz: Arc<dyn AuthzResolver<P>>,
+    mandate: Arc<dyn Mandate<P>>,
     context_params: Arc<dyn ContextParamResolver>,
     config: AgentConfig,
 }
@@ -167,9 +168,20 @@ impl<P: Send + Sync> Agent<P> {
             registry,
             llm,
             authz,
+            mandate: Arc::new(NoMandate),
             context_params,
             config,
         }
+    }
+
+    /// Installs the agent's mandate (spec §9.8) — the delegation contract
+    /// between user and agent, evaluated in addition to authorization at
+    /// propose time and confirm-time revalidation. Without this call the
+    /// agent runs under [`NoMandate`] (authorization alone decides).
+    #[must_use]
+    pub fn with_mandate(mut self, mandate: Arc<dyn Mandate<P>>) -> Self {
+        self.mandate = mandate;
+        self
     }
 
     fn system_turn(&self) -> ChatTurn {
@@ -685,6 +697,7 @@ impl<P: Send + Sync> Agent<P> {
         Validator::new(
             &self.registry,
             self.authz.as_ref(),
+            self.mandate.as_ref(),
             self.context_params.as_ref(),
         )
     }

@@ -297,6 +297,104 @@ impl<P: Send + Sync> AuthzResolver<P> for AllowAll {
     }
 }
 
+/// Mandate decision from the user→agent delegation contract (spec §9.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MandateDecision {
+    /// The user has delegated this action to the agent.
+    Allow,
+    /// The agent was never delegated this; the reason is surfaced in
+    /// validation failures.
+    Deny(String),
+}
+
+/// The second, optional permission layer (spec §9.8): not "may this user do
+/// X" ([`AuthzResolver`]) but "did this user authorize the *agent* to bring
+/// them X". Narrow-only by construction — the pipeline evaluates it in
+/// addition to authorization, never instead of it, so a mandate can only
+/// remove reach.
+///
+/// Evaluated at propose time (an out-of-mandate proposal is `invalid` and
+/// never renders — a prompt-injected model cannot even ask) and again at
+/// confirm-time revalidation. It runs after the dry-run step, so
+/// blast-radius rules can read the preview.
+#[async_trait]
+pub trait Mandate<P>: Send + Sync {
+    /// Decides whether the agent may propose `action_id` with `params` for
+    /// `principal`. `preview` is present iff the action mutates.
+    async fn mandate(
+        &self,
+        principal: &P,
+        action_id: &str,
+        params: &JsonMap,
+        preview: Option<&DryRunPreview>,
+    ) -> MandateDecision;
+}
+
+/// Async closures are mandates, mirroring the [`AuthzResolver`] blanket
+/// impl — a config- or policy-engine-backed rule doesn't need a trait impl.
+///
+/// ```
+/// use std::sync::Arc;
+/// use cleverhans_core::JsonMap;
+/// use cleverhans_core::envelope::DryRunPreview;
+/// use cleverhans_core::seams::{Mandate, MandateDecision};
+///
+/// #[derive(Clone)]
+/// struct User;
+///
+/// let mandate: Arc<dyn Mandate<User>> = Arc::new(
+///     |_user: User, _action_id: String, _params: JsonMap, preview: Option<DryRunPreview>| async move {
+///         match preview {
+///             Some(p) if p.affected_count > 20 => {
+///                 MandateDecision::Deny("touches more than 20 records".to_owned())
+///             }
+///             _ => MandateDecision::Allow,
+///         }
+///     },
+/// );
+/// ```
+#[async_trait]
+impl<P, F, Fut> Mandate<P> for F
+where
+    P: Clone + Send + Sync,
+    F: Fn(P, String, JsonMap, Option<DryRunPreview>) -> Fut + Send + Sync,
+    Fut: Future<Output = MandateDecision> + Send,
+{
+    async fn mandate(
+        &self,
+        principal: &P,
+        action_id: &str,
+        params: &JsonMap,
+        preview: Option<&DryRunPreview>,
+    ) -> MandateDecision {
+        self(
+            principal.clone(),
+            action_id.to_owned(),
+            params.clone(),
+            preview.cloned(),
+        )
+        .await
+    }
+}
+
+/// The default [`Mandate`]: no delegation contract, every authorized action
+/// may be proposed. Effective permission is then authorization alone —
+/// exactly the pre-§9.8 behavior.
+pub struct NoMandate;
+
+#[async_trait]
+impl<P: Send + Sync> Mandate<P> for NoMandate {
+    async fn mandate(
+        &self,
+        _: &P,
+        _: &str,
+        _: &JsonMap,
+        _: Option<&DryRunPreview>,
+    ) -> MandateDecision {
+        MandateDecision::Allow
+    }
+}
+
 /// Extracts context-sourced param values from the current context snapshot
 /// (spec §9.5). Only the framework calls this — the model never writes
 /// context-sourced params.
