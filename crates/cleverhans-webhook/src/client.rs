@@ -229,10 +229,12 @@ impl HostClient {
 
     async fn deliver(
         &self,
+        endpoint: &'static str,
         route: &Route,
         timeout: Duration,
         body: &impl Serialize,
     ) -> Result<reqwest::Response, DeliveryError> {
+        let started = std::time::Instant::now();
         let url = format!("{}{}", self.base_url, route.path);
         // Serialize once and send those exact bytes: the §14.2 signature is
         // over the body as delivered, never a re-serialization.
@@ -259,22 +261,45 @@ impl HostClient {
             );
         }
         let response = request.body(bytes).send().await.map_err(|err| {
+            tracing::info!(
+                target: "cleverhans::telemetry::delivery",
+                endpoint,
+                outcome = "unreachable",
+                duration_ms = started.elapsed().as_millis() as u64,
+                "webhook delivery"
+            );
             DeliveryError::Unreachable(if err.is_timeout() {
                 format!("timeout after {timeout:?} delivering to {url}")
             } else {
                 format!("{err} delivering to {url}")
             })
         })?;
+        let status = response.status();
+        tracing::info!(
+            target: "cleverhans::telemetry::delivery",
+            endpoint,
+            outcome = if status.is_success() {
+                "ok"
+            } else if status.is_client_error() {
+                "status_4xx"
+            } else {
+                "status_5xx"
+            },
+            status = status.as_u16(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "webhook delivery"
+        );
         Ok(response)
     }
 
     async fn deliver_json<T: serde::de::DeserializeOwned>(
         &self,
+        endpoint: &'static str,
         route: &Route,
         timeout: Duration,
         body: &impl Serialize,
     ) -> Result<T, DeliveryError> {
-        let response = self.deliver(route, timeout, body).await?;
+        let response = self.deliver(endpoint, route, timeout, body).await?;
         let status = response.status();
         let text = response
             .text()
@@ -298,7 +323,12 @@ impl HostClient {
         request: &VerifySessionRequest,
     ) -> Result<(StatusCode, Option<VerifySessionResponse>), DeliveryError> {
         let response = self
-            .deliver(route, self.timeouts.verify_session, request)
+            .deliver(
+                "verify_session",
+                route,
+                self.timeouts.verify_session,
+                request,
+            )
             .await?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -323,7 +353,7 @@ impl HostClient {
         route: &Route,
         request: &SeamRequest,
     ) -> Result<AuthorizeResponse, DeliveryError> {
-        self.deliver_json(route, self.timeouts.authorize, request)
+        self.deliver_json("authorize", route, self.timeouts.authorize, request)
             .await
     }
 
@@ -337,7 +367,7 @@ impl HostClient {
         route: &Route,
         request: &SeamRequest,
     ) -> Result<DryRunResponse, DeliveryError> {
-        self.deliver_json(route, self.timeouts.dry_run, request)
+        self.deliver_json("dry_run", route, self.timeouts.dry_run, request)
             .await
     }
 
@@ -352,7 +382,7 @@ impl HostClient {
         route: &Route,
         request: &BuildSlotsRequest,
     ) -> Result<BuildSlotsResponse, DeliveryError> {
-        self.deliver_json(route, self.timeouts.build_slots, request)
+        self.deliver_json("build_slots", route, self.timeouts.build_slots, request)
             .await
     }
 
@@ -367,7 +397,7 @@ impl HostClient {
         for attempt in 1..=attempts {
             request.attempt = attempt;
             match self
-                .deliver_json::<ExecuteResponse>(route, self.timeouts.execute, &request)
+                .deliver_json::<ExecuteResponse>("execute", route, self.timeouts.execute, &request)
                 .await
             {
                 Ok(response) => return ExecuteDelivery::Answered(response),
@@ -378,6 +408,14 @@ impl HostClient {
                         attempt,
                         "execute delivery unreachable: {message}"
                     );
+                    if attempt < attempts {
+                        tracing::info!(
+                            target: "cleverhans::telemetry::delivery_retry",
+                            action_id = request.action_id.as_str(),
+                            attempt,
+                            "execute retry"
+                        );
+                    }
                     last_unreachable = message;
                     if attempt < attempts {
                         tokio::time::sleep(backoff).await;

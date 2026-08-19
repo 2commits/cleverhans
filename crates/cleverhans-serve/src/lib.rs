@@ -8,6 +8,7 @@
 //! `mock-host` subcommands.
 
 pub mod config;
+pub mod telemetry;
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -69,6 +70,9 @@ pub fn build_app(
     llm: Arc<dyn LlmProvider>,
 ) -> Result<Router, BuildError> {
     let client = Arc::new(HostClient::new(resolved.client.clone())?);
+    // Every model call is timed via a telemetry event; conversion to OTEL
+    // only happens when the metrics layer is installed.
+    let llm: Arc<dyn LlmProvider> = Arc::new(crate::telemetry::InstrumentedLlm(llm));
 
     let mut builder = RegistryBuilder::from_schema(schema.clone());
     for def in &schema.actions {

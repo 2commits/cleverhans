@@ -251,6 +251,32 @@ fn llm_section_resolves_and_refuses() {
 }
 
 #[test]
+fn telemetry_section_parses_with_defaults_and_env_fallback() {
+    let off = Config::from_toml(BASE).expect("parses");
+    // SAFETY: test-only env mutation.
+    unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT") };
+    assert!(off.telemetry.endpoint().is_none(), "off by default");
+
+    let on = Config::from_toml(&format!(
+        "{BASE}\n[telemetry]\notlp_endpoint = \"http://localhost:4318\"\nexport_interval_ms = 500\n"
+    ))
+    .expect("parses");
+    assert_eq!(
+        on.telemetry.endpoint().as_deref(),
+        Some("http://localhost:4318")
+    );
+    assert_eq!(on.telemetry.export_interval_ms, Some(500));
+
+    unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318") };
+    assert_eq!(
+        off.telemetry.endpoint().as_deref(),
+        Some("http://collector:4318"),
+        "standard env fallback"
+    );
+    unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT") };
+}
+
+#[test]
 fn route_strings_are_validated() {
     set_secret();
     let config = Config::from_toml(&with_actions(

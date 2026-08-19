@@ -192,20 +192,36 @@ pub async fn run_session<P, S>(
     P: Send + Sync,
     S: Stream<Item = String> + Unpin + Send,
 {
-    tracing::info!("envelope session opened");
+    let session_started = std::time::Instant::now();
+    tracing::info!(target: "cleverhans::telemetry::session", phase = "opened", "envelope session opened");
     let mut pump = FramePump::new(principal);
     while let Some(frame) = inbound.next().await {
         match pump.handle_frame(&agent, &frame, &mut tx).await {
             FrameOutcome::Continue => {}
             FrameOutcome::Closed => {
-                tracing::info!("envelope session closed");
+                tracing::info!(
+                    target: "cleverhans::telemetry::session",
+                    phase = "closed",
+                    duration_ms = session_started.elapsed().as_millis() as u64,
+                    "envelope session closed"
+                );
                 return;
             }
             FrameOutcome::ReceiverGone => {
-                tracing::info!("client gone; envelope session closed");
+                tracing::info!(
+                    target: "cleverhans::telemetry::session",
+                    phase = "closed",
+                    duration_ms = session_started.elapsed().as_millis() as u64,
+                    "client gone; envelope session closed"
+                );
                 return;
             }
         }
     }
-    tracing::info!("envelope session closed");
+    tracing::info!(
+        target: "cleverhans::telemetry::session",
+        phase = "closed",
+        duration_ms = session_started.elapsed().as_millis() as u64,
+        "envelope session closed"
+    );
 }

@@ -20,6 +20,10 @@ cleverhans-conformance = { workspace = true }
 cleverhans-core = { workspace = true }
 cleverhans-webhook = { workspace = true }
 cleverhans-ws = { workspace = true }
+futures-util = { workspace = true }
+opentelemetry = "0.32.0"
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "metrics"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -32,6 +36,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { workspace = true, features = ["macros", "time"] }
 tokio-tungstenite = "0.24"
 futures-util = { workspace = true }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "testing"] }
 
 [lints]
 workspace = true

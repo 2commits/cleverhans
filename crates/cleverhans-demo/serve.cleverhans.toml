@@ -38,6 +38,13 @@ endpoint = "POST /cleverhans/authorize"
 [llm]
 provider = "anthropic"          # or: provider = "ollama", model = "qwen3"
 
+# OTLP metrics export (spec'd metric set in docs/hosting-webhooks.md).
+# Off unless an endpoint is set here or via OTEL_EXPORTER_OTLP_ENDPOINT.
+# [telemetry]
+# otlp_endpoint = "http://localhost:4318"
+# service_name = "cleverhans"
+# export_interval_ms = 10000
+
 [agent]
 app_instructions = "You are the assistant inside a document-management app. Keep answers short."
 
