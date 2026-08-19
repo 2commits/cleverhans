@@ -1,6 +1,6 @@
 {
   "name": "create-cleverhans",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Scaffold CleverHans (propose-only HITL agent) into an existing project: registry, host stub, codegen config, eval cases",
   "license": "Apache-2.0",
   "repository": {
