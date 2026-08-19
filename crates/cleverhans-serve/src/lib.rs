@@ -72,7 +72,7 @@ pub fn build_app(
     let client = Arc::new(HostClient::new(resolved.client.clone())?);
     // Every model call is timed via a telemetry event; conversion to OTEL
     // only happens when the metrics layer is installed.
-    let llm: Arc<dyn LlmProvider> = Arc::new(crate::telemetry::InstrumentedLlm(llm));
+    let llm: Arc<dyn LlmProvider> = Arc::new(crate::telemetry::InstrumentedLlm::new(llm));
 
     let mut builder = RegistryBuilder::from_schema(schema.clone());
     for def in &schema.actions {

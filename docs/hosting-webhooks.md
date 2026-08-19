@@ -128,6 +128,11 @@ CLEVERHANS_UPSTREAM_SECRET=dev-secret ANTHROPIC_API_KEY=... \
 pnpm --filter @cleverhans/playground dev                   # connects to 8787 unchanged
 ```
 
+The playground's `GET /documents` is proxied by its dev server to whichever
+demo backend answers — the in-process demo on 8787, or the webhook host on
+8791 in this topology — so the doc list needs no per-topology env var
+(`DOCS_ORIGIN` overrides it).
+
 ## 3. Declare your actions and run the service
 
 `registry.json` is the same spec §4 document every CleverHans host uses.
@@ -198,19 +203,29 @@ exporter, point `otlp_endpoint` at it.
 | Metric | Type | Attributes |
 |---|---|---|
 | `cleverhans.proposals` | counter | `state` (validated/invalid/executed/failed/expired/rejected), `action_id` |
-| `cleverhans.webhook.deliveries` | counter | `endpoint`, `outcome` (ok/status_4xx/status_5xx/unreachable) |
+| `cleverhans.webhook.deliveries` | counter | `endpoint`, `outcome` (ok/status_4xx/status_5xx/status_other/unreachable) |
 | `cleverhans.webhook.delivery.duration` | histogram (ms) | `endpoint` |
-| `cleverhans.webhook.execute.retries` | counter | — |
+| `cleverhans.webhook.execute.retries` | counter | `action_id` |
 | `cleverhans.sessions.active` | up-down counter | — |
 | `cleverhans.sessions.duration` | histogram (ms) | — |
 | `cleverhans.llm.requests` | counter | `outcome` |
 | `cleverhans.llm.duration` | histogram (ms) | — |
 
+`cleverhans.proposals` counts *accepted* lifecycle transitions, so it
+mirrors the §7 state machine rather than attempted edges. The session
+metrics count envelope sessions on either transport (WebSocket and gRPC),
+and close on task drop, so the active gauge cannot drift upward.
+
+`RUST_LOG` does **not** gate any of this: the log filter is attached to the
+log layer alone, so turning logging down — or scoping it to a crate — keeps
+the instruments recording.
+
 Under the hood the framework crates emit the same signals as structured
 `tracing` events under `cleverhans::telemetry::*` targets — in-process
 (Rust/Node/Python) integrators get them in their logs with no OTEL
 involved, and can convert them with their own subscriber if they want
-metrics without serve.
+metrics without serve. The targets and their fields are documented in
+`cleverhans_core::telemetry`.
 
 ## Security posture (spec §12.11–12.14)
 

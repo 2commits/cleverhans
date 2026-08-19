@@ -414,3 +414,140 @@ async fn confirm_of_unknown_proposal_is_an_error() {
         "got {events:?}"
     );
 }
+
+/// The lifecycle telemetry contract: one event per *accepted* transition,
+/// every one of them keyed by action.
+mod telemetry {
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+
+    use super::{
+        Agent, ClientEvent, ProposalState, ScriptedLlm, Session, User, agent_with, open_session,
+        propose, tool_call,
+    };
+
+    /// `(state, action_id)` of every `cleverhans::telemetry::proposal` event.
+    #[derive(Default)]
+    struct Events {
+        seen: Mutex<Vec<(String, String)>>,
+    }
+
+    struct Collector(Arc<Events>);
+
+    #[derive(Default)]
+    struct Captured {
+        state: String,
+        action_id: String,
+    }
+
+    impl Visit for Captured {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            match field.name() {
+                "state" => self.state = value.to_owned(),
+                "action_id" => self.action_id = value.to_owned(),
+                _ => {}
+            }
+        }
+
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.record_str(field, format!("{value:?}").trim_matches('"'));
+        }
+    }
+
+    impl tracing::Subscriber for Collector {
+        fn register_callsite(&self, _: &tracing::Metadata<'_>) -> tracing::subscriber::Interest {
+            // Never cache: the process runs other subscribers in parallel
+            // tests, and a cached `never` would silence them too.
+            tracing::subscriber::Interest::sometimes()
+        }
+
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            metadata.target() == "cleverhans::telemetry::proposal"
+        }
+
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            let mut captured = Captured::default();
+            event.record(&mut captured);
+            self.0
+                .seen
+                .lock()
+                .expect("lock")
+                .push((captured.state, captured.action_id));
+        }
+
+        fn enter(&self, _: &tracing::span::Id) {}
+
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    fn collecting() -> (Arc<Events>, tracing::subscriber::DefaultGuard) {
+        let events = Arc::new(Events::default());
+        let guard = tracing::subscriber::set_default(Collector(Arc::clone(&events)));
+        (events, guard)
+    }
+
+    async fn rejected_session() -> (Arc<Events>, tracing::subscriber::DefaultGuard) {
+        let (events, guard) = collecting();
+        let executions = Arc::new(Mutex::new(Vec::new()));
+        let agent: Agent<User> =
+            agent_with(ScriptedLlm::returning(tool_call()), Arc::clone(&executions));
+        let mut session = Session::new(User {
+            id: "alex",
+            can_remove_co_buyer: true,
+        });
+        open_session(&agent, &mut session).await;
+        let proposal_id = propose(&agent, &mut session).await;
+        agent
+            .handle(
+                &mut session,
+                ClientEvent::RejectAction {
+                    proposal_id: proposal_id.clone(),
+                    reason: Some("changed my mind".to_owned()),
+                },
+            )
+            .await;
+        // A confirm after the rejection: the store refuses the edge, so it
+        // must not show up as a second lifecycle event.
+        agent
+            .handle(&mut session, ClientEvent::ConfirmAction { proposal_id })
+            .await;
+        (events, guard)
+    }
+
+    #[tokio::test]
+    async fn a_rejection_is_keyed_by_action() {
+        let (recorded, _guard) = rejected_session().await;
+        let events = recorded.seen.lock().expect("lock").clone();
+        assert!(
+            events.contains(&(
+                ProposalState::Rejected.to_string(),
+                "transaction.coBuyer.remove".to_owned()
+            )),
+            "rejection must carry action_id, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_transition_emits_nothing() {
+        let (recorded, _guard) = rejected_session().await;
+        let events = recorded.seen.lock().expect("lock").clone();
+        let states: Vec<&str> = events.iter().map(|(state, _)| state.as_str()).collect();
+        assert_eq!(
+            states,
+            vec![
+                ProposalState::Validated.to_string(),
+                ProposalState::Rejected.to_string()
+            ],
+            "only accepted transitions are lifecycle events"
+        );
+    }
+}

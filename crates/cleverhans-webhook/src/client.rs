@@ -260,30 +260,40 @@ impl HostClient {
                 crate::sign::signature_header(key.as_bytes(), timestamp, &bytes),
             );
         }
-        let response = request.body(bytes).send().await.map_err(|err| {
-            tracing::info!(
-                target: "cleverhans::telemetry::delivery",
-                endpoint,
-                outcome = "unreachable",
-                duration_ms = started.elapsed().as_millis() as u64,
-                "webhook delivery"
-            );
-            DeliveryError::Unreachable(if err.is_timeout() {
-                format!("timeout after {timeout:?} delivering to {url}")
-            } else {
-                format!("{err} delivering to {url}")
+        let response = request
+            .body(bytes)
+            .send()
+            .await
+            .inspect_err(|_| {
+                tracing::info!(
+                    target: "cleverhans::telemetry::delivery",
+                    endpoint,
+                    outcome = "unreachable",
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "webhook delivery"
+                );
             })
-        })?;
+            .map_err(|err| {
+                DeliveryError::Unreachable(if err.is_timeout() {
+                    format!("timeout after {timeout:?} delivering to {url}")
+                } else {
+                    format!("{err} delivering to {url}")
+                })
+            })?;
         let status = response.status();
         tracing::info!(
             target: "cleverhans::telemetry::delivery",
             endpoint,
+            // 1xx/3xx are neither success nor an error class: labelling them
+            // `status_5xx` would invent host failures that never happened.
             outcome = if status.is_success() {
                 "ok"
             } else if status.is_client_error() {
                 "status_4xx"
-            } else {
+            } else if status.is_server_error() {
                 "status_5xx"
+            } else {
+                "status_other"
             },
             status = status.as_u16(),
             duration_ms = started.elapsed().as_millis() as u64,
@@ -408,6 +418,7 @@ impl HostClient {
                         attempt,
                         "execute delivery unreachable: {message}"
                     );
+                    last_unreachable = message;
                     if attempt < attempts {
                         tracing::info!(
                             target: "cleverhans::telemetry::delivery_retry",
@@ -415,9 +426,6 @@ impl HostClient {
                             attempt,
                             "execute retry"
                         );
-                    }
-                    last_unreachable = message;
-                    if attempt < attempts {
                         tokio::time::sleep(backoff).await;
                         backoff *= 2;
                     }

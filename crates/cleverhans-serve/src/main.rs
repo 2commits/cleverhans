@@ -115,13 +115,10 @@ enum Command {
 
 fn init_tracing(metrics_layer: Option<cleverhans_serve::telemetry::MetricsLayer>) {
     use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer())
-        .with(metrics_layer)
-        .init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // `RUST_LOG` gates the log layer only — see `telemetry::subscriber`.
+    cleverhans_serve::telemetry::subscriber(filter, metrics_layer).init();
 }
 
 #[tokio::main]
@@ -161,12 +158,8 @@ async fn serve(registry: &PathBuf, config: &PathBuf, bind: Option<String>) -> an
     let parsed = Config::from_toml(&config_text)?;
     // Telemetry before the subscriber: the metrics layer converts the lib
     // crates' telemetry events; the guard flushes on shutdown.
-    let telemetry =
-        cleverhans_serve::telemetry::init(&parsed.telemetry).map_err(anyhow::Error::msg)?;
-    let (_telemetry_guard, metrics_layer) = match telemetry {
-        Some((guard, layer)) => (Some(guard), Some(layer)),
-        None => (None, None),
-    };
+    let (_telemetry_guard, metrics_layer) =
+        cleverhans_serve::telemetry::init(&parsed.telemetry)?.unzip();
     init_tracing(metrics_layer);
     let mut resolved = parsed.resolve(&schema)?;
     if let Some(bind) = bind {

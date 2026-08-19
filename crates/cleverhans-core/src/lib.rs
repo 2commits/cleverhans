@@ -14,6 +14,8 @@
 //! - [`validation`] — propose-time and confirm-time validation pipeline
 //! - [`seams`] — the traits an application implements to plug in
 //! - [`agent`] — the agent loop tying the above together
+//! - [`telemetry`] — the stable `cleverhans::telemetry::*` event contract
+//!   the framework emits (no metrics dependency; subscribers convert)
 //! - [`declarative`] — data-driven seam encodings (slots-as-config,
 //!   scripted model items) shared by fixtures, FFI hosts, and service config
 //! - [`test_util`] (feature `test-util`) — deterministic doubles for
@@ -28,6 +30,7 @@ pub mod proposal;
 pub mod registry;
 pub mod schema;
 pub mod seams;
+pub mod telemetry;
 #[cfg(feature = "test-util")]
 pub mod test_util;
 pub mod validation;

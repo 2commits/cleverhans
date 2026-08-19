@@ -1,12 +1,14 @@
 //! OTEL metrics for the service (CLE-6): the lib crates emit structured
 //! `tracing` events under the stable `cleverhans::telemetry::*` targets
-//! (they carry no OTEL dependency); this module — the only OTEL code in
-//! the workspace — converts those events into OTLP-exported instruments.
+//! (they carry no OTEL dependency, see [`cleverhans_core::telemetry`]);
+//! this module — the only OTEL code in the workspace — converts those
+//! events into OTLP-exported instruments.
 //!
 //! Runtime-gated: without an endpoint (config `[telemetry].otlp_endpoint`
 //! or the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env), nothing initializes
 //! and the service behaves exactly as before.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
@@ -14,12 +16,13 @@ use opentelemetry::metrics::{Counter, Histogram, Meter, MeterProvider as _, UpDo
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use serde::Deserialize;
 use tracing::field::{Field, Visit};
-use tracing_subscriber::Layer;
+use tracing_subscriber::filter::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::{Layer, Registry};
 
 use cleverhans_core::async_trait;
 use cleverhans_core::error::LlmError;
 use cleverhans_core::seams::{CompletionItem, CompletionRequest, CompletionStream, LlmProvider};
-use std::sync::Arc;
 
 /// `[telemetry]` — OTLP push export (metrics only).
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -37,17 +40,42 @@ pub struct TelemetrySection {
     pub export_interval_ms: Option<u64>,
 }
 
+/// The standard OTEL endpoint variable, used when the config omits one.
+pub const ENDPOINT_ENV: &str = "OTEL_EXPORTER_OTLP_ENDPOINT";
+
 impl TelemetrySection {
     /// The effective endpoint, honoring the standard OTEL env fallback.
+    /// Startup-only: this reads the process environment on every call.
     #[must_use]
     pub fn endpoint(&self) -> Option<String> {
-        self.otlp_endpoint
-            .clone()
-            .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
+        resolve_endpoint(
+            self.otlp_endpoint.as_deref(),
+            std::env::var(ENDPOINT_ENV).ok().as_deref(),
+        )
     }
 }
 
+/// Endpoint precedence, as a pure function: explicit config wins, the
+/// standard env is the fallback, neither means telemetry stays off.
+#[must_use]
+pub fn resolve_endpoint(explicit: Option<&str>, env: Option<&str>) -> Option<String> {
+    explicit.or(env).map(ToOwned::to_owned)
+}
+
+/// Errors from [`init`].
+#[derive(Debug, thiserror::Error)]
+pub enum TelemetryError {
+    /// The OTLP exporter could not be built (typically a malformed
+    /// endpoint) — startup fails loudly rather than exporting nowhere.
+    #[error("otlp metric exporter: {0}")]
+    Exporter(#[from] opentelemetry_otlp::ExporterBuildError),
+}
+
 /// Flushes and shuts the meter provider down on drop.
+///
+/// Hold it for the life of the process: dropping it exports whatever the
+/// current interval has accumulated. A signal that kills the process
+/// without unwinding skips this, losing at most one interval.
 pub struct TelemetryGuard {
     provider: SdkMeterProvider,
 }
@@ -55,7 +83,7 @@ pub struct TelemetryGuard {
 impl Drop for TelemetryGuard {
     fn drop(&mut self) {
         if let Err(err) = self.provider.shutdown() {
-            eprintln!("telemetry shutdown: {err}");
+            tracing::error!("telemetry shutdown: {err}");
         }
     }
 }
@@ -106,8 +134,11 @@ impl Instruments {
 ///
 /// # Errors
 ///
-/// Exporter construction failures (bad endpoint), stringly.
-pub fn init(section: &TelemetrySection) -> Result<Option<(TelemetryGuard, MetricsLayer)>, String> {
+/// [`TelemetryError::Exporter`] when the endpoint cannot be turned into an
+/// exporter.
+pub fn init(
+    section: &TelemetrySection,
+) -> Result<Option<(TelemetryGuard, MetricsLayer)>, TelemetryError> {
     let Some(endpoint) = section.endpoint() else {
         return Ok(None);
     };
@@ -115,8 +146,7 @@ pub fn init(section: &TelemetrySection) -> Result<Option<(TelemetryGuard, Metric
     let exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
         .with_endpoint(format!("{}/v1/metrics", endpoint.trim_end_matches('/')))
-        .build()
-        .map_err(|err| format!("otlp metric exporter: {err}"))?;
+        .build()?;
     let reader = PeriodicReader::builder(exporter)
         .with_interval(Duration::from_millis(
             section.export_interval_ms.unwrap_or(10_000),
@@ -146,6 +176,23 @@ pub fn init(section: &TelemetrySection) -> Result<Option<(TelemetryGuard, Metric
 pub fn layer_for_provider(provider: &SdkMeterProvider) -> MetricsLayer {
     let meter = provider.meter("cleverhans-serve");
     MetricsLayer::new(Instruments::new(&meter))
+}
+
+/// The process subscriber: `filter` gates the log layer **only**.
+///
+/// Metrics deliberately sit outside it. An `EnvFilter` added to the
+/// registry as a layer filters the whole stack, so `RUST_LOG=warn` — or any
+/// crate-scoped directive, since the telemetry targets (`cleverhans::…`)
+/// match no crate name — would silently zero every instrument while the
+/// service looks healthy.
+#[must_use]
+pub fn subscriber(
+    filter: EnvFilter,
+    metrics_layer: Option<MetricsLayer>,
+) -> impl tracing::Subscriber + Send + Sync {
+    Registry::default()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .with(metrics_layer)
 }
 
 /// Converts `cleverhans::telemetry::*` tracing events into instrument
@@ -196,9 +243,14 @@ impl Visit for Fields {
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        // `%state` (Display) and similar arrive as debug records.
-        let rendered = format!("{value:?}").trim_matches('"').to_owned();
-        self.record_str(field, &rendered);
+        // `%state` (Display) and similar arrive as debug records; `?value`
+        // renders strings quoted, so strip one pair — not every quote.
+        let rendered = format!("{value:?}");
+        let unquoted = rendered
+            .strip_prefix('"')
+            .and_then(|inner| inner.strip_suffix('"'))
+            .unwrap_or(&rendered);
+        self.record_str(field, unquoted);
     }
 }
 
@@ -247,7 +299,10 @@ impl<S: tracing::Subscriber> Layer<S> for MetricsLayer {
                 }
             }
             "delivery_retry" => {
-                self.instruments.execute_retries.add(1, &[]);
+                let attrs = fields.action_id.map_or_else(Vec::new, |action_id| {
+                    vec![KeyValue::new("action_id", action_id)]
+                });
+                self.instruments.execute_retries.add(1, &attrs);
             }
             "session" => match fields.phase.as_deref() {
                 Some("opened") => self.instruments.sessions_active.add(1, &[]),
@@ -276,18 +331,67 @@ impl<S: tracing::Subscriber> Layer<S> for MetricsLayer {
     }
 }
 
+/// One model call, emitting its `cleverhans::telemetry::llm` event on drop.
+///
+/// Drop, not end-of-stream: the agent abandons a stream mid-generation
+/// whenever the client goes away, and those calls — the slow and failing
+/// ones — are exactly the ones a tail-of-stream emitter loses.
+struct LlmSpan {
+    started: std::time::Instant,
+    errored: bool,
+}
+
+impl LlmSpan {
+    fn start() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            errored: false,
+        }
+    }
+
+    /// Flips the outcome. A method, not a field write: a closure that only
+    /// touches `span.errored` captures that field alone (disjoint capture),
+    /// leaving the guard behind to drop at function exit and time nothing.
+    fn mark_error(&mut self) {
+        self.errored = true;
+    }
+}
+
+impl Drop for LlmSpan {
+    fn drop(&mut self) {
+        tracing::info!(
+            target: "cleverhans::telemetry::llm",
+            outcome = if self.errored { "error" } else { "ok" },
+            duration_ms = self.started.elapsed().as_millis() as u64,
+            "llm call"
+        );
+    }
+}
+
 /// Times every model call, emitting `cleverhans::telemetry::llm` events —
 /// the serve-side complement to the lib crates' events. Wraps the real
 /// provider transparently; event emission is cheap and unconditional, the
 /// OTEL conversion only happens when the layer is installed.
-pub struct InstrumentedLlm(pub Arc<dyn LlmProvider>);
+pub struct InstrumentedLlm {
+    inner: Arc<dyn LlmProvider>,
+}
+
+impl InstrumentedLlm {
+    /// Wraps `inner`, timing both the buffered and streaming calls.
+    #[must_use]
+    pub fn new(inner: Arc<dyn LlmProvider>) -> Self {
+        Self { inner }
+    }
+}
 
 #[async_trait]
 impl LlmProvider for InstrumentedLlm {
     async fn complete(&self, request: CompletionRequest) -> Result<Vec<CompletionItem>, LlmError> {
-        let started = std::time::Instant::now();
-        let result = self.0.complete(request).await;
-        emit_llm(&result, started);
+        let mut span = LlmSpan::start();
+        let result = self.inner.complete(request).await;
+        if result.is_err() {
+            span.mark_error();
+        }
         result
     }
 
@@ -295,54 +399,22 @@ impl LlmProvider for InstrumentedLlm {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionStream, LlmError> {
-        use futures_util::StreamExt;
-        let started = std::time::Instant::now();
-        match self.0.complete_stream(request).await {
-            Ok(stream) => {
-                // Observe the full stream: duration covers the last chunk,
-                // and any mid-stream error flips the outcome.
-                let errored = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                let seen = Arc::clone(&errored);
-                let instrumented = stream
-                    .map(move |chunk| {
-                        if chunk.is_err() {
-                            seen.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        chunk
-                    })
-                    .chain(futures_util::stream::poll_fn(move |_| {
-                        tracing::info!(
-                            target: "cleverhans::telemetry::llm",
-                            outcome = if errored.load(std::sync::atomic::Ordering::Relaxed) {
-                                "error"
-                            } else {
-                                "ok"
-                            },
-                            duration_ms = started.elapsed().as_millis() as u64,
-                            "llm call"
-                        );
-                        std::task::Poll::Ready(None)
-                    }));
-                Ok(Box::pin(instrumented))
-            }
+        use futures_util::StreamExt as _;
+        let mut span = LlmSpan::start();
+        let stream = match self.inner.complete_stream(request).await {
+            Ok(stream) => stream,
             Err(err) => {
-                tracing::info!(
-                    target: "cleverhans::telemetry::llm",
-                    outcome = "error",
-                    duration_ms = started.elapsed().as_millis() as u64,
-                    "llm call"
-                );
-                Err(err)
+                span.mark_error();
+                return Err(err);
             }
-        }
+        };
+        // The span moves into the stream, so it emits exactly once: when the
+        // consumer exhausts the stream, or when it drops it early.
+        Ok(Box::pin(stream.map(move |chunk| {
+            if chunk.is_err() {
+                span.mark_error();
+            }
+            chunk
+        })))
     }
-}
-
-fn emit_llm<T>(result: &Result<T, LlmError>, started: std::time::Instant) {
-    tracing::info!(
-        target: "cleverhans::telemetry::llm",
-        outcome = if result.is_ok() { "ok" } else { "error" },
-        duration_ms = started.elapsed().as_millis() as u64,
-        "llm call"
-    );
 }

@@ -13,9 +13,9 @@
 #       --config crates/cleverhans-demo/serve.cleverhans.toml \
 #       --bind 127.0.0.1:8787
 #
-#   # terminal 3 — the click-around UI (doc list fetched live from the host)
-#   VITE_DOCS_URL=http://127.0.0.1:8791/documents \
-#     pnpm --filter @cleverhans/playground dev
+#   # terminal 3 — the click-around UI (its dev server proxies the doc list
+#   # to whichever demo backend is up, here the host on 8791)
+#   pnpm --filter @cleverhans/playground dev
 #
 # Renames/publishes/deletes then execute in the host's store over the
 # webhooks and fold back into the playground page. Restart the host to
