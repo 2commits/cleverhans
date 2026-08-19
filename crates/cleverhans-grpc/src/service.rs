@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use cleverhans_core::agent::{Agent, Session};
 use cleverhans_core::envelope::ClientEvent;
+use cleverhans_core::telemetry::SessionSpan;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt};
@@ -66,11 +67,15 @@ pub async fn run_session<P, S>(
     P: Send + Sync,
     S: Stream<Item = Result<pb::ClientEvent, Status>> + Unpin + Send,
 {
+    // Same session signal as the WebSocket transport: the metric means
+    // "open envelope sessions", not "open WebSockets".
+    let mut span = SessionSpan::open();
     let mut session = Session::new(principal);
     let mut initialized = false;
     while let Some(next) = inbound.next().await {
         let Ok(pb_event) = next else {
             // Client-side transport error: nothing sensible left to do.
+            span.set_reason("transport_error");
             return;
         };
         let event = match convert::client_event(pb_event) {
@@ -78,6 +83,7 @@ pub async fn run_session<P, S>(
             Err(err) => {
                 let malformed = error_event("malformed_event", err.to_string(), true);
                 if tx.send(Ok(malformed)).await.is_err() {
+                    span.set_reason("client_gone");
                     return;
                 }
                 continue;
@@ -91,6 +97,7 @@ pub async fn run_session<P, S>(
                     false,
                 );
                 let _ = tx.send(Ok(not_init)).await;
+                span.set_reason("init_required");
                 return;
             }
             initialized = true;
@@ -118,6 +125,7 @@ pub async fn run_session<P, S>(
         };
         let ((), receiver_alive) = tokio::join!(drive, forward);
         if !receiver_alive {
+            span.set_reason("client_gone");
             return;
         }
     }

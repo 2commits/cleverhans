@@ -250,30 +250,59 @@ fn llm_section_resolves_and_refuses() {
     );
 }
 
-#[test]
-fn telemetry_section_parses_with_defaults_and_env_fallback() {
-    let off = Config::from_toml(BASE).expect("parses");
-    // SAFETY: test-only env mutation.
-    unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT") };
-    assert!(off.telemetry.endpoint().is_none(), "off by default");
+// Endpoint precedence is tested through the pure `resolve_endpoint`:
+// mutating the process environment races every other test thread reading
+// it (which is why `set_var` is `unsafe` in edition 2024).
+mod telemetry_section {
+    use super::{BASE, Config};
+    use cleverhans_serve::telemetry::resolve_endpoint;
 
-    let on = Config::from_toml(&format!(
-        "{BASE}\n[telemetry]\notlp_endpoint = \"http://localhost:4318\"\nexport_interval_ms = 500\n"
-    ))
-    .expect("parses");
-    assert_eq!(
-        on.telemetry.endpoint().as_deref(),
-        Some("http://localhost:4318")
-    );
-    assert_eq!(on.telemetry.export_interval_ms, Some(500));
+    fn with_telemetry(body: &str) -> Config {
+        Config::from_toml(&format!("{BASE}\n[telemetry]\n{body}")).expect("parses")
+    }
 
-    unsafe { std::env::set_var("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318") };
-    assert_eq!(
-        off.telemetry.endpoint().as_deref(),
-        Some("http://collector:4318"),
-        "standard env fallback"
-    );
-    unsafe { std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT") };
+    #[test]
+    fn is_absent_when_the_section_is_omitted() {
+        let config = Config::from_toml(BASE).expect("parses");
+        assert_eq!(config.telemetry.otlp_endpoint, None, "off by default");
+    }
+
+    #[test]
+    fn parses_the_export_interval() {
+        let config = with_telemetry("export_interval_ms = 500\n");
+        assert_eq!(config.telemetry.export_interval_ms, Some(500));
+    }
+
+    #[test]
+    fn parses_the_configured_endpoint() {
+        let config = with_telemetry("otlp_endpoint = \"http://localhost:4318\"\n");
+        assert_eq!(
+            config.telemetry.otlp_endpoint.as_deref(),
+            Some("http://localhost:4318")
+        );
+    }
+
+    #[test]
+    fn resolves_to_none_without_config_or_env() {
+        assert_eq!(resolve_endpoint(None, None), None);
+    }
+
+    #[test]
+    fn resolves_to_the_standard_env_when_config_is_silent() {
+        assert_eq!(
+            resolve_endpoint(None, Some("http://collector:4318")).as_deref(),
+            Some("http://collector:4318")
+        );
+    }
+
+    #[test]
+    fn prefers_the_configured_endpoint_over_the_env() {
+        assert_eq!(
+            resolve_endpoint(Some("http://localhost:4318"), Some("http://collector:4318"))
+                .as_deref(),
+            Some("http://localhost:4318")
+        );
+    }
 }
 
 #[test]

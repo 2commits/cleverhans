@@ -488,12 +488,10 @@ impl<P: Send + Sync> Agent<P> {
                     role: ChatRole::Tool,
                     content: format!("proposal rejected by validation: {failure}. {guidance}"),
                 });
-                tracing::info!(
-                    target: "cleverhans::telemetry::proposal",
-                    action_id = candidate.action_id.as_str(),
-                    state = "invalid",
-                    reason = %failure,
-                    "proposal state"
+                crate::telemetry::proposal_state(
+                    &candidate.action_id,
+                    ProposalState::Invalid,
+                    Some(&failure.to_string()),
                 );
                 return Err(failure);
             }
@@ -524,12 +522,7 @@ impl<P: Send + Sync> Agent<P> {
             role: ChatRole::Tool,
             content: format!("proposed `{action_id}` as `{proposal_id}`, awaiting user decision"),
         });
-        tracing::info!(
-            target: "cleverhans::telemetry::proposal",
-            action_id = action_id.as_str(),
-            state = "validated",
-            "proposal state"
-        );
+        crate::telemetry::proposal_state(&action_id, ProposalState::Validated, None);
         Ok(ServerEvent::ActionProposal(proposal))
     }
 
@@ -584,16 +577,19 @@ impl<P: Send + Sync> Agent<P> {
             .validate(&candidate, &session.context, &session.principal)
             .await;
         let expired = |reason: String, session: &mut Session<P>| {
-            tracing::info!(
-                target: "cleverhans::telemetry::proposal",
-                action_id = proposal.action_id.as_str(),
-                state = "expired",
-                reason = reason.as_str(),
-                "proposal state"
-            );
-            let _ = session
+            // Telemetry follows the transition: an edge the store refuses is
+            // not a lifecycle event.
+            if session
                 .proposals
-                .transition(proposal_id, ProposalState::Expired);
+                .transition(proposal_id, ProposalState::Expired)
+                .is_ok()
+            {
+                crate::telemetry::proposal_state(
+                    &proposal.action_id,
+                    ProposalState::Expired,
+                    Some(&reason),
+                );
+            }
             vec![ServerEvent::ProposalStateChanged {
                 proposal_id: proposal_id.to_owned(),
                 state: ProposalState::Expired,
@@ -621,14 +617,9 @@ impl<P: Send + Sync> Agent<P> {
             Ok(value) => (ProposalState::Executed, None, Some(value)),
             Err(err) => (ProposalState::Failed, Some(err.to_string()), None),
         };
-        tracing::info!(
-            target: "cleverhans::telemetry::proposal",
-            action_id = proposal.action_id.as_str(),
-            state = %state,
-            reason = reason.as_deref().unwrap_or(""),
-            "proposal state"
-        );
-        let _ = session.proposals.transition(proposal_id, state);
+        if session.proposals.transition(proposal_id, state).is_ok() {
+            crate::telemetry::proposal_state(&proposal.action_id, state, reason.as_deref());
+        }
         session.history.push(ChatTurn {
             role: ChatRole::Tool,
             content: format!(
@@ -652,16 +643,20 @@ impl<P: Send + Sync> Agent<P> {
         proposal_id: &str,
         reason: Option<String>,
     ) -> Vec<ServerEvent> {
+        // Read before the transition: the signal is keyed by action like
+        // every other lifecycle state, so `sum by (action_id)` stays whole.
+        let action_id = session
+            .proposals
+            .get(proposal_id)
+            .map(|tracked| tracked.proposal.action_id.clone());
         match session
             .proposals
             .transition(proposal_id, ProposalState::Rejected)
         {
             Ok(state) => {
-                tracing::info!(
-                    target: "cleverhans::telemetry::proposal",
-                    state = "rejected",
-                    "proposal state"
-                );
+                if let Some(action_id) = &action_id {
+                    crate::telemetry::proposal_state(action_id, state, reason.as_deref());
+                }
                 session.history.push(ChatTurn {
                     role: ChatRole::Tool,
                     content: format!(

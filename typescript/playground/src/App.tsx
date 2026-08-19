@@ -14,8 +14,9 @@
  * The doc list is fetched live from the backend (`GET /documents`) on load,
  * then folds this session's executed proposal results in, so
  * renames/publishes/deletes show up on the page and reloads can't drift
- * from real store state. Against `cleverhans serve`, point the fetch at the
- * demo host: VITE_DOCS_URL=http://127.0.0.1:8791/documents
+ * from real store state. The dev server proxies that path to whichever
+ * demo backend is up (see `vite.config.ts`), so no topology needs a port
+ * in its env.
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -47,12 +48,12 @@ const SEED: Doc[] = [
   { id: "doc-3", title: "Retro Notes", status: "published" },
 ];
 
-/** Where the live document list lives. In-process demo serves it beside the
- * WS mount (port 8787); against `cleverhans serve`, point this at the demo
- * host instead: VITE_DOCS_URL=http://127.0.0.1:8791/documents */
+/** Where the live document list lives. Same-origin by default: the dev
+ * server resolves it to the demo backend that is actually running, which
+ * keeps the browser out of CORS. `VITE_DOCS_URL` takes an absolute URL for
+ * setups that serve this page without the vite dev server. */
 const DOCS_URL: string =
-  (import.meta as { env?: Record<string, string> }).env?.VITE_DOCS_URL ??
-  "http://127.0.0.1:8787/documents";
+  (import.meta as { env?: Record<string, string> }).env?.VITE_DOCS_URL ?? "/documents";
 
 function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
@@ -171,12 +172,21 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     fetch(DOCS_URL)
-      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then(async (response) => {
+        if (!response.ok) {
+          // The dev proxy answers 503 with the origins it tried, so the
+          // reason is on the page instead of buried in a network tab.
+          throw new Error(`${response.status} ${await response.text()}`.trim());
+        }
+        return response.json() as Promise<Doc[]>;
+      })
       .then((docs: Doc[]) => {
         if (!cancelled) setBaseline(docs);
       })
-      .catch(() => {
-        console.warn(`playground: ${DOCS_URL} unreachable — rendering the static seed`);
+      .catch((error: unknown) => {
+        console.warn(
+          `playground: GET ${DOCS_URL} failed (${String(error)}) — rendering the static seed`,
+        );
       });
     return () => {
       cancelled = true;

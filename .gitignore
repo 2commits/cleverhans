@@ -15,3 +15,7 @@ typescript/cleverhans-node/index.d.ts
 python/cleverhans-hitl/src/cleverhans_agent/_native.abi3.so
 typescript/cleverhans-node/npm/
 local.toml
+
+# Claude Code local state (skills/ stays tracked deliberately)
+.claude/worktrees/
+.claude/settings.local.json

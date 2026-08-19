@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 
 use cleverhans_core::agent::{Agent, Session};
 use cleverhans_core::envelope::{ClientEvent, ServerEvent};
+use cleverhans_core::telemetry::SessionSpan;
 
 /// Encodes one outbound envelope event as a JSON text frame.
 pub fn to_json(event: &ServerEvent) -> String {
@@ -192,36 +193,18 @@ pub async fn run_session<P, S>(
     P: Send + Sync,
     S: Stream<Item = String> + Unpin + Send,
 {
-    let session_started = std::time::Instant::now();
-    tracing::info!(target: "cleverhans::telemetry::session", phase = "opened", "envelope session opened");
+    // RAII: the paired `closed` event fires on every exit, including a
+    // dropped task, so the active-session gauge cannot drift upward.
+    let mut span = SessionSpan::open();
     let mut pump = FramePump::new(principal);
     while let Some(frame) = inbound.next().await {
         match pump.handle_frame(&agent, &frame, &mut tx).await {
             FrameOutcome::Continue => {}
-            FrameOutcome::Closed => {
-                tracing::info!(
-                    target: "cleverhans::telemetry::session",
-                    phase = "closed",
-                    duration_ms = session_started.elapsed().as_millis() as u64,
-                    "envelope session closed"
-                );
-                return;
-            }
+            FrameOutcome::Closed => return,
             FrameOutcome::ReceiverGone => {
-                tracing::info!(
-                    target: "cleverhans::telemetry::session",
-                    phase = "closed",
-                    duration_ms = session_started.elapsed().as_millis() as u64,
-                    "client gone; envelope session closed"
-                );
+                span.set_reason("client_gone");
                 return;
             }
         }
     }
-    tracing::info!(
-        target: "cleverhans::telemetry::session",
-        phase = "closed",
-        duration_ms = session_started.elapsed().as_millis() as u64,
-        "envelope session closed"
-    );
 }

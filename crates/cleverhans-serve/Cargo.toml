@@ -35,7 +35,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "time"] }
 tokio-tungstenite = "0.24"
-futures-util = { workspace = true }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "testing"] }
 
 [lints]
