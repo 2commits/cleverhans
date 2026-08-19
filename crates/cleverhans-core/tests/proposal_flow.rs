@@ -164,6 +164,7 @@ fn registry(executions: Arc<Mutex<Vec<(String, JsonMap)>>>) -> Registry<User> {
                 block_type: "confirm".to_owned(),
                 mutates: true,
                 authz_key: "transaction.coBuyer.remove".to_owned(),
+                display: None,
             },
             Arc::new(RecordingHandler { executions }),
             Some(Arc::new(CoBuyerDryRun)),

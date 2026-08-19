@@ -196,6 +196,7 @@ mod tests {
             block_type: "confirm".to_owned(),
             mutates: true,
             authz_key: "tx".to_owned(),
+            display: None,
         }
     }
 

@@ -337,6 +337,7 @@ mod tests {
                     block_type: "confirm".to_owned(),
                     mutates: false,
                     authz_key: "note".to_owned(),
+                    display: None,
                 },
                 Arc::new(OkHandler),
                 None,

@@ -29,6 +29,25 @@ Rules that bite:
   the model, not for docs.
 - Avoid `__` in action ids (LLM tool-name rules mangle `.` to `__`).
 
+Optionally add `display` so the action shows up in the app's command palette
+(spec §4.3). The agent ignores it; `palette::match_actions` matches on it:
+
+```json
+{ "id": "document.share",
+  "description": "…model-facing text as above…",
+  "display": {
+    "title": "Share document",
+    "description": "Send a teammate an access link — you confirm first",
+    "keywords": ["share", "send", "access", "teammate"],
+    "group": "documents",
+    "tags": []
+  },
+  "params": [ … ] }
+```
+
+Write `display.description` for the user (the outcome), not for the model —
+the two texts are different surfaces and should stay different.
+
 ## 2. Regenerate types
 
 ```sh
