@@ -233,6 +233,7 @@ pub struct Registry<P> {
     actions: BTreeMap<String, ActionRegistration<P>>,
     blocks: BTreeMap<String, BlockDef>,
     context_params: BTreeMap<String, String>,
+    schema_uri: Option<String>,
 }
 
 impl<P> Registry<P> {
@@ -245,6 +246,7 @@ impl<P> Registry<P> {
             pending: Vec::new(),
             attachments: Vec::new(),
             context_params: BTreeMap::new(),
+            schema_uri: None,
         }
     }
 
@@ -274,10 +276,12 @@ impl<P> Registry<P> {
 
     /// The wire-visible registry as a versioned document — ID-sorted,
     /// `spec_version` = [`crate::SPEC_VERSION`]. The inverse of
-    /// [`RegistryBuilder::from_schema`] modulo handlers.
+    /// [`RegistryBuilder::from_schema`] modulo handlers: a `"$schema"`
+    /// reference the loaded document carried is exported unchanged.
     #[must_use]
     pub fn schema(&self) -> crate::schema::RegistrySchema {
         crate::schema::RegistrySchema {
+            schema_uri: self.schema_uri.clone(),
             spec_version: crate::SPEC_VERSION.to_owned(),
             blocks: self.blocks.values().cloned().collect(),
             actions: self.actions.values().map(|reg| reg.def.clone()).collect(),
@@ -332,6 +336,7 @@ pub struct RegistryBuilder<P> {
     pending: Vec<ActionDef>,
     attachments: Vec<Attachment<P>>,
     context_params: BTreeMap<String, String>,
+    schema_uri: Option<String>,
 }
 
 struct Attachment<P> {
@@ -401,6 +406,7 @@ impl<P> RegistryBuilder<P> {
         builder.blocks = schema.blocks;
         builder.pending = schema.actions;
         builder.context_params = schema.context_params;
+        builder.schema_uri = schema.schema_uri;
         builder
     }
 
@@ -441,6 +447,7 @@ impl<P> RegistryBuilder<P> {
     /// use cleverhans_core::schema::RegistrySchema;
     /// use cleverhans_core::{JsonMap, slots};
     /// # let schema = RegistrySchema {
+    /// #     schema_uri: None,
     /// #     spec_version: cleverhans_core::SPEC_VERSION.to_owned(),
     /// #     blocks: vec![cleverhans_core::registry::BlockDef {
     /// #         block_type: "confirm".to_owned(), slots: vec![] }],
@@ -594,6 +601,7 @@ impl<P> RegistryBuilder<P> {
             actions,
             blocks,
             context_params: self.context_params,
+            schema_uri: self.schema_uri,
         })
     }
 }
@@ -675,6 +683,7 @@ mod tests {
             }
 
             let schema = crate::schema::RegistrySchema {
+                schema_uri: None,
                 spec_version: crate::SPEC_VERSION.to_owned(),
                 blocks: vec![confirm_block()],
                 actions: vec![action("a.b", false)],
@@ -734,6 +743,7 @@ mod tests {
 
         pub(super) fn schema() -> RegistrySchema {
             RegistrySchema {
+                schema_uri: Some("../../spec/schemas/registry.json".to_owned()),
                 spec_version: crate::SPEC_VERSION.to_owned(),
                 blocks: vec![confirm_block()],
                 actions: vec![action("a.b", true)],

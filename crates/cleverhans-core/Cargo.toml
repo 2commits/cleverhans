@@ -24,6 +24,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 cleverhans-core = { path = ".", features = ["test-util"] }
 futures-util = { workspace = true }
+jsonschema = { version = "0.63", default-features = false }
 tokio = { workspace = true }
 
 [lints]

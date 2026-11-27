@@ -1,8 +1,13 @@
 # CleverHans Protocol Specification
 
-**Version:** 0.1.4-draft
+**Version:** 0.1.5-draft
 **Status:** Draft
 **Tracking:** ED-536
+
+*Changes in 0.1.5: machine-readable JSON Schemas in `spec/schemas/` for the JSON
+encoding of the envelope (§6) and for the declarative registry document (§4), which
+MAY name its schema in an optional top-level `"$schema"` key. Additive; the wire
+version remains `0.1`.*
 
 *Changes in 0.1.4: optional §14.9 `build_slots` endpoint — host-authored
 dynamic slot content in the service topology. Additive; webhook contract
@@ -113,6 +118,11 @@ the build-time invariants above are enforced after attachment. The same document
 codegen input (§9) and the interchange format for conformance fixtures and non-Rust
 registry authors. It never crosses the wire.
 
+*Schema (non-normative).* [`spec/schemas/registry.json`](schemas/registry.json) is a
+JSON Schema of the reference document. A document MAY name it in an optional top-level
+`"$schema"` key for editor validation; the framework carries the value through
+unchanged and never fetches it.
+
 ### 4.1 Parameter sources
 
 Every parameter is tagged `source: context` or `source: utterance`:
@@ -189,6 +199,12 @@ what lets the envelope stay stable while the registry evolves freely.
 A conforming binding (gRPC, WebSocket + JSON-RPC, tRPC, …) MUST carry every message and
 field below with equivalent semantics. The reference binding is a gRPC bidirectional
 stream (§11).
+
+The JSON encoding of the envelope — each message an object tagged by a snake_case
+`type`, its fields beside the tag — is given as JSON Schemas in
+[`spec/schemas/client-event.json`](schemas/client-event.json) and
+[`spec/schemas/server-event.json`](schemas/server-event.json) (see
+[`spec/schemas/README.md`](schemas/README.md)).
 
 ### 6.1 Session
 
@@ -613,6 +629,9 @@ Invariants 11–14 apply to the standalone service topology (§10.2):
   and new message types; existing field semantics never change.
 - **Registry:** evolves freely and independently of the envelope; adding an action is
   an app-side edit plus codegen, with no protocol change. This decoupling is the point.
+- **Schemas:** the JSON Schemas in `spec/schemas/` follow this document's version (their
+  `$id` names the wire version, `v0.1`). The envelope schemas leave every message open to
+  unknown fields, so additive evolution validates.
 - **Webhook contract (§14):** versioned independently of this document, as an integer
   carried in `X-CleverHans-Webhook-Version`. Like the gRPC and WS bindings, the webhook
   contract is a binding-layer artifact: it evolves additively (new optional fields, new

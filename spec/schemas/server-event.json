@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/v0.1/server-event.json",
+  "title": "ServerEvent (SPEC.md §6.3)",
+  "description": "One message from the agent to the app frontend, in the JSON encoding of the envelope (SPEC.md §6, §6.3). Each message is a JSON object whose `type` names the variant in snake_case; the variant's fields sit beside `type`, including the fields of the proposal message. The envelope evolves additively within a major version (SPEC.md §13): receivers ignore fields they do not know, so no message here sets `additionalProperties: false`. Kept in step with `ServerEvent` in crates/cleverhans-core/src/envelope.rs by crates/cleverhans-core/tests/spec_schemas.rs.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/ChatMessage" },
+    { "$ref": "#/$defs/ActionProposal" },
+    { "$ref": "#/$defs/ProposalStateChanged" },
+    { "$ref": "#/$defs/Error" }
+  ],
+  "$defs": {
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Assistant prose. One text segment MAY arrive as any number of `done: false` fragments followed by exactly one `done: true` message with the authoritative full text, all sharing one `msg_id` (SPEC.md §6.3, streaming contract).",
+      "type": "object",
+      "required": ["type", "msg_id", "text", "done"],
+      "properties": {
+        "type": { "const": "chat_message", "description": "Message discriminator." },
+        "msg_id": {
+          "type": "string",
+          "description": "Agent-generated message ID; clients key fragment accumulation by it."
+        },
+        "text": {
+          "type": "string",
+          "description": "Message content: an incremental fragment when `done` is false, the authoritative full text of the segment when `done` is true."
+        },
+        "done": {
+          "type": "boolean",
+          "description": "Marks turn completion. A non-streaming sender emits a single `done: true` message per segment."
+        }
+      }
+    },
+    "ActionProposal": {
+      "title": "ActionProposal",
+      "description": "A validated proposal, ready to render (SPEC.md §6.4). Immutable once emitted; a changed intent is a new proposal. On the wire the proposal fields sit beside `type`.",
+      "type": "object",
+      "required": [
+        "type",
+        "proposal_id",
+        "action_id",
+        "params",
+        "block_type",
+        "slots",
+        "context_seq"
+      ],
+      "properties": {
+        "type": { "const": "action_proposal", "description": "Message discriminator." },
+        "proposal_id": {
+          "type": "string",
+          "description": "Agent-generated, opaque, unique per session."
+        },
+        "action_id": {
+          "type": "string",
+          "description": "A registered action ID (SPEC.md §3). The envelope never enumerates actions."
+        },
+        "params": {
+          "type": "object",
+          "description": "Fully filled params: context-sourced + validated utterance-sourced."
+        },
+        "block_type": {
+          "type": "string",
+          "description": "A registered block type (normally the action's)."
+        },
+        "slots": {
+          "type": "object",
+          "description": "Typed slot values for that block (SPEC.md §8)."
+        },
+        "preview": {
+          "description": "Permission-correct dry-run preview. REQUIRED for mutating actions (SPEC.md §6.4); null or absent otherwise.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/DryRunPreview" }]
+        },
+        "context_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "The context snapshot this proposal was built against (unsigned 64-bit)."
+        },
+        "turn_msg_id": {
+          "type": ["string", "null"],
+          "description": "Correlates to the chat turn that produced it. Absent and null both mean no correlation."
+        }
+      }
+    },
+    "ProposalStateChanged": {
+      "title": "ProposalStateChanged",
+      "description": "Lifecycle transition after emission (SPEC.md §7).",
+      "type": "object",
+      "required": ["type", "proposal_id", "state"],
+      "properties": {
+        "type": { "const": "proposal_state_changed", "description": "Message discriminator." },
+        "proposal_id": { "type": "string", "description": "The proposal that changed." },
+        "state": {
+          "type": "string",
+          "description": "New state: a SPEC.md §7 state name. The states a frontend observes are `validated`, `confirmed`, `executed` (with `result`), `rejected`, `expired` and `failed`; `proposed` and `invalid` exist only agent-side. A plain string, not an enum, on purpose (SPEC.md §11): a frontend MUST treat an unrecognized state as terminal and act on it no further."
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "Optional explanation (expiry cause, handler error, …). Absent and null both mean no reason."
+        },
+        "result": {
+          "description": "Handler result for `executed`: any JSON value. Absent and null both mean no result."
+        }
+      }
+    },
+    "Error": {
+      "title": "Error",
+      "description": "Stream- or turn-level errors that are not proposal state changes.",
+      "type": "object",
+      "required": ["type", "code", "message", "recoverable"],
+      "properties": {
+        "type": { "const": "error", "description": "Message discriminator." },
+        "code": { "type": "string", "description": "Machine-readable code." },
+        "message": { "type": "string", "description": "Human-readable message." },
+        "recoverable": { "type": "boolean", "description": "Whether the session can continue." }
+      }
+    },
+    "DryRunPreview": {
+      "title": "DryRunPreview",
+      "description": "Permission-correct preview of what a mutating action would do (SPEC.md §6.4), computed side-effect-free under the principal's own data-access rules. Every field has a default, so `{}` is a valid empty preview.",
+      "type": "object",
+      "properties": {
+        "affected_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "How many records the action would touch (unsigned 64-bit). Absent means 0."
+        },
+        "sample_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "A bounded sample of affected record identifiers. Absent means an empty list."
+        },
+        "summary": {
+          "type": ["string", "null"],
+          "description": "Optional human-readable one-liner. Absent and null both mean no summary."
+        },
+        "extensions": {
+          "type": "object",
+          "description": "App-defined preview payload (e.g. a diff). Absent means an empty map."
+        }
+      }
+    }
+  }
+}

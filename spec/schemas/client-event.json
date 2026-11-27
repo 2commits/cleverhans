@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/v0.1/client-event.json",
+  "title": "ClientEvent (SPEC.md §6.2)",
+  "description": "One message from the app frontend to the agent, in the JSON encoding of the envelope (SPEC.md §6, §6.2). Each message is a JSON object whose `type` names the variant in snake_case; the variant's fields sit beside `type`. The envelope evolves additively within a major version (SPEC.md §13): receivers ignore fields they do not know, so no message here sets `additionalProperties: false`. Kept in step with `ClientEvent` in crates/cleverhans-core/src/envelope.rs by crates/cleverhans-core/tests/spec_schemas.rs.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/Init" },
+    { "$ref": "#/$defs/ContextUpdate" },
+    { "$ref": "#/$defs/UserMessage" },
+    { "$ref": "#/$defs/ConfirmAction" },
+    { "$ref": "#/$defs/RejectAction" }
+  ],
+  "$defs": {
+    "Init": {
+      "title": "Init",
+      "description": "Opens the session; MUST be the first message on a stream (SPEC.md §6.1).",
+      "type": "object",
+      "required": ["type", "spec_version", "context"],
+      "properties": {
+        "type": { "const": "init", "description": "Message discriminator." },
+        "spec_version": {
+          "type": "string",
+          "description": "Protocol version the client speaks (SPEC.md §13). The agent accepts a version with the same major.minor prefix on a segment boundary, e.g. `0.1`, `0.1.0` or `0.1.0-draft` for `0.1`."
+        },
+        "context": {
+          "$ref": "#/$defs/Context",
+          "description": "Initial context snapshot."
+        }
+      }
+    },
+    "ContextUpdate": {
+      "title": "ContextUpdate",
+      "description": "Replaces the current context snapshot.",
+      "type": "object",
+      "required": ["type", "context", "context_seq"],
+      "properties": {
+        "type": { "const": "context_update", "description": "Message discriminator." },
+        "context": {
+          "$ref": "#/$defs/Context",
+          "description": "The new snapshot."
+        },
+        "context_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "Client-monotonic sequence number (unsigned 64-bit); proposals record the snapshot they were built against (SPEC.md §6.4)."
+        }
+      }
+    },
+    "UserMessage": {
+      "title": "UserMessage",
+      "description": "A user chat turn.",
+      "type": "object",
+      "required": ["type", "text", "client_msg_id"],
+      "properties": {
+        "type": { "const": "user_message", "description": "Message discriminator." },
+        "text": { "type": "string", "description": "The utterance." },
+        "client_msg_id": { "type": "string", "description": "Client-side correlation ID." }
+      }
+    },
+    "ConfirmAction": {
+      "title": "ConfirmAction",
+      "description": "The user confirms a proposal. Triggers confirm-time revalidation and execution (SPEC.md §7.3).",
+      "type": "object",
+      "required": ["type", "proposal_id"],
+      "properties": {
+        "type": { "const": "confirm_action", "description": "Message discriminator." },
+        "proposal_id": { "type": "string", "description": "The proposal being confirmed." }
+      }
+    },
+    "RejectAction": {
+      "title": "RejectAction",
+      "description": "The user declines a proposal. Terminal for that proposal.",
+      "type": "object",
+      "required": ["type", "proposal_id"],
+      "properties": {
+        "type": { "const": "reject_action", "description": "Message discriminator." },
+        "proposal_id": { "type": "string", "description": "The proposal being rejected." },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "Optional reason, fed back to the model as conversation context. Absent and null both mean no reason."
+        }
+      }
+    },
+    "Context": {
+      "title": "Context",
+      "description": "A context snapshot, app → agent (SPEC.md §6.2): the reference shape of the app seam of SPEC.md §9.5. Context flows one way and is the only channel through which context-sourced params are filled. Unknown fields are ignored; app-defined additions belong in `extensions`.",
+      "type": "object",
+      "required": ["route"],
+      "properties": {
+        "route": { "type": "string", "description": "Current app route/location." },
+        "params": {
+          "type": "object",
+          "description": "Route or view parameters. Absent means an empty map."
+        },
+        "selected_record_id": {
+          "type": ["string", "null"],
+          "description": "Current selection, if any. Absent and null both mean no selection."
+        },
+        "view_type": {
+          "type": ["string", "null"],
+          "description": "View kind, e.g. `\"detail\"` or `\"list\"`. Absent and null both mean unknown."
+        },
+        "extensions": {
+          "type": "object",
+          "description": "App-defined additions. Absent means an empty map."
+        }
+      }
+    }
+  }
+}
