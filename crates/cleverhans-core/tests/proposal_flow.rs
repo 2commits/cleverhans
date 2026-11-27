@@ -18,7 +18,7 @@ use cleverhans_core::registry::{
 };
 use cleverhans_core::seams::{
     ActionHandler, AuthzDecision, AuthzResolver, CompletionItem, CompletionRequest,
-    ContextParamResolver, DryRunHandler, LlmProvider, SlotBuilder,
+    ContextParamResolver, DryRunHandler, LlmProvider, Mandate, MandateDecision, SlotBuilder,
 };
 
 #[derive(Clone)]
@@ -417,6 +417,106 @@ async fn confirm_of_unknown_proposal_is_an_error() {
 
 /// The lifecycle telemetry contract: one event per *accepted* transition,
 /// every one of them keyed by action.
+mod mandate {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    /// A revocable mandate: allow while the flag is up, deny once lowered —
+    /// the "user edits their delegation contract mid-session" shape.
+    struct FlagMandate {
+        delegated: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl Mandate<User> for FlagMandate {
+        async fn mandate(
+            &self,
+            _principal: &User,
+            _action_id: &str,
+            _params: &JsonMap,
+            _preview: Option<&DryRunPreview>,
+        ) -> MandateDecision {
+            if self.delegated.load(Ordering::SeqCst) {
+                MandateDecision::Allow
+            } else {
+                MandateDecision::Deny("co-buyer removal is no longer delegated".to_owned())
+            }
+        }
+    }
+
+    fn mandated_agent(
+        executions: Arc<Mutex<Vec<(String, JsonMap)>>>,
+        delegated: Arc<AtomicBool>,
+    ) -> Agent<User> {
+        agent_with(ScriptedLlm::returning(tool_call()), executions)
+            .with_mandate(Arc::new(FlagMandate { delegated }))
+    }
+
+    #[tokio::test]
+    async fn out_of_mandate_proposal_never_renders() {
+        let executions = Arc::new(Mutex::new(Vec::new()));
+        let agent = mandated_agent(Arc::clone(&executions), Arc::new(AtomicBool::new(false)));
+        let mut session = Session::new(User {
+            id: "u_1",
+            can_remove_co_buyer: true,
+        });
+        open_session(&agent, &mut session).await;
+
+        let events = agent
+            .handle(&mut session, user_message("remove the co-buyer"))
+            .await;
+
+        // The authorized-but-undelegated action declines in chat — no
+        // proposal event, so no card can render and no confirm can follow.
+        match &events[..] {
+            [
+                ServerEvent::ChatMessage {
+                    text, done: true, ..
+                },
+            ] => {
+                assert!(
+                    text.contains("outside the agent's mandate"),
+                    "decline should name the mandate: {text}"
+                );
+            }
+            other => panic!("expected a decline, got {other:?}"),
+        }
+        assert!(executions.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn mandate_revoked_between_propose_and_confirm_expires() {
+        let executions = Arc::new(Mutex::new(Vec::new()));
+        let delegated = Arc::new(AtomicBool::new(true));
+        let agent = mandated_agent(Arc::clone(&executions), Arc::clone(&delegated));
+        let mut session = Session::new(User {
+            id: "u_1",
+            can_remove_co_buyer: true,
+        });
+        open_session(&agent, &mut session).await;
+        let proposal_id = propose(&agent, &mut session).await;
+
+        delegated.store(false, Ordering::SeqCst);
+        let events = agent
+            .handle(&mut session, ClientEvent::ConfirmAction { proposal_id })
+            .await;
+
+        // Confirm-time revalidation re-runs the mandate: the stale approval
+        // expires instead of executing (§7.3 / §9.8).
+        match &events[..] {
+            [ServerEvent::ProposalStateChanged { state, .. }] => {
+                assert_eq!(*state, ProposalState::Expired);
+            }
+            other => panic!("expected expiry, got {other:?}"),
+        }
+        assert!(
+            executions.lock().expect("lock").is_empty(),
+            "a revoked mandate must never execute"
+        );
+    }
+}
+
 mod telemetry {
     use std::sync::{Arc, Mutex};
 
