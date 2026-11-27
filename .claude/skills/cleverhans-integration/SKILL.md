@@ -17,7 +17,7 @@ Repo layout: Rust crates in `crates/`, TypeScript packages in `typescript/`, Pyt
 
 ```toml
 [dependencies]
-cleverhans = { version = "0.1", features = ["ws", "anthropic"] }  # or "ollama", "evals"
+cleverhans = { version = "0.1", features = ["ws", "anthropic"] }  # or "ollama", "openai", "evals"
 
 [dev-dependencies]
 cleverhans = { version = "0.1", features = ["test-util"] }
@@ -27,7 +27,7 @@ cleverhans = { version = "0.1", features = ["test-util"] }
 use cleverhans::prelude::*; // Registry, seams traits, Agent, slots!, agent_router*, providers, typed_handler…
 ```
 
-Features: `ws` (axum binding), `anthropic` / `ollama` (providers + `llm::from_env`), `evals` (eval harness), `test-util` (offline test doubles). The core protocol is always present. The sub-crates (`cleverhans-core`, `cleverhans-ws`, `cleverhans-llm-*`, `cleverhans-evals`, `cleverhans-codegen`, `cleverhans-conformance`, `cleverhans-grpc`, `cleverhans-ffi`, `cleverhans-py`, `cleverhans-node`) still exist if you need one directly.
+Features: `ws` (axum binding), `anthropic` / `ollama` / `openai` (providers + `llm::from_env`; `openai` = any OpenAI-compatible server such as vLLM), `evals` (eval harness), `test-util` (offline test doubles). The core protocol is always present. The sub-crates (`cleverhans-core`, `cleverhans-ws`, `cleverhans-llm-*`, `cleverhans-evals`, `cleverhans-codegen`, `cleverhans-conformance`, `cleverhans-grpc`, `cleverhans-ffi`, `cleverhans-py`, `cleverhans-node`) still exist if you need one directly.
 
 ### 1. Author the registry as a document
 
@@ -118,13 +118,17 @@ Validation order (propose and confirm time): existence → param fill + typechec
 
 ### 4. Pick an LLM provider
 
-`llm::from_env()` is the bootstrap every app was going to copy: `OLLAMA_MODEL` wins, else `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`), else a clear error naming the accepted vars.
+`llm::from_env()` is the bootstrap every app was going to copy: `OLLAMA_MODEL` wins, else `OPENAI_BASE_URL` + `OPENAI_MODEL` (+ optional `OPENAI_API_KEY`; an OpenAI-compatible server such as vLLM — `OPENAI_API_KEY` alone never selects it), else `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`), else a clear error naming the accepted vars.
 
 ```rust
 let llm = cleverhans::llm::from_env()?;
 // or explicitly:
 let llm: Arc<dyn LlmProvider> = Arc::new(AnthropicProvider::new(AnthropicConfig::new(key)));
 let llm: Arc<dyn LlmProvider> = Arc::new(OllamaProvider::new(OllamaConfig::new("qwen3".into())));
+let llm: Arc<dyn LlmProvider> = Arc::new(OpenAiProvider::new(OpenAiConfig::new(
+    "http://localhost:8000/v1".into(), // vLLM; base URL includes the version path
+    "<model>".into(),
+)));
 ```
 
 Custom providers implement `LlmProvider::complete` (and optionally `complete_stream`).
@@ -236,7 +240,7 @@ const docs = applyResults(SEED, snapshot.proposals); // filter view.state === "e
 ## Managing the integration
 
 - **Add an action**: edit `registry.json` (+ block if new) + `context_params` mapping → regenerate bindings (codegen `--rs`/`--ts`/`--py`) → attach handler + dry-run (if mutating) + slot builder in the builder → frontend block component (or reuse `confirm`/`bulk_preview`) → eval cases (happy path, context-dependent targeting with/without selection, a decline near the boundary).
-- **Dev loop**: `cargo run -p cleverhans-demo -- serve` (needs `ANTHROPIC_API_KEY` or `OLLAMA_MODEL`) → `pnpm --filter @cleverhans/playground dev`. Demo also serves a plain chat page at `http://127.0.0.1:8787`.
+- **Dev loop**: `cargo run -p cleverhans-demo -- serve` (needs `ANTHROPIC_API_KEY`, `OLLAMA_MODEL`, or `OPENAI_BASE_URL` + `OPENAI_MODEL`) → `pnpm --filter @cleverhans/playground dev`. Demo also serves a plain chat page at `http://127.0.0.1:8787`.
 - **Full test gate**: `cargo test && cargo clippy --all-targets --all-features -- -D warnings` (plus `cargo clippy -p cleverhans-py -p cleverhans-node` — those two are excluded from default-members) `&& pnpm -r test && pnpm -r typecheck`.
 - **Versioning**: client `Init` carries `spec_version`; major.minor must be compatible (spec §13). `RegistrySchema::from_json` version-gates the document the same way.
 - **Security invariants** (spec §12) that must survive any change: model emits only utterance params; mutating actions always dry-run; execution requires a `ConfirmedProposal`; revalidation at confirm time; principals come only from the app's extractor/middleware.

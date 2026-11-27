@@ -15,6 +15,8 @@ ws = ["dep:cleverhans-ws"]
 anthropic = ["dep:cleverhans-llm-anthropic"]
 # Local Ollama provider (zero egress).
 ollama = ["dep:cleverhans-llm-ollama"]
+# OpenAI-compatible Chat Completions provider (vLLM, SGLang, NIM, hosted).
+openai = ["dep:cleverhans-llm-openai"]
 # Action-mapping eval harness.
 evals = ["dep:cleverhans-evals"]
 # Deterministic doubles for offline integration tests.
@@ -26,6 +28,7 @@ serde = { workspace = true }
 cleverhans-evals = { workspace = true, optional = true }
 cleverhans-llm-anthropic = { workspace = true, optional = true }
 cleverhans-llm-ollama = { workspace = true, optional = true }
+cleverhans-llm-openai = { workspace = true, optional = true }
 cleverhans-ws = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

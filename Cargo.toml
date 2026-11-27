@@ -10,6 +10,7 @@ members = [
     "crates/cleverhans-grpc",
     "crates/cleverhans-llm-anthropic",
     "crates/cleverhans-llm-ollama",
+    "crates/cleverhans-llm-openai",
     "crates/cleverhans-node",
     "crates/cleverhans-py",
     "crates/cleverhans-serve",
@@ -33,6 +34,7 @@ default-members = [
     "crates/cleverhans-grpc",
     "crates/cleverhans-llm-anthropic",
     "crates/cleverhans-llm-ollama",
+    "crates/cleverhans-llm-openai",
     "crates/cleverhans-ws",
     "crates/cleverhans-ws-core",
 ]
@@ -54,6 +56,7 @@ cleverhans-ws-core = { path = "crates/cleverhans-ws-core", version = "0.2.0" }
 cleverhans-ws = { path = "crates/cleverhans-ws", version = "0.2.0" }
 cleverhans-llm-anthropic = { path = "crates/cleverhans-llm-anthropic", version = "0.2.0" }
 cleverhans-llm-ollama = { path = "crates/cleverhans-llm-ollama", version = "0.2.0" }
+cleverhans-llm-openai = { path = "crates/cleverhans-llm-openai", version = "0.2.0" }
 cleverhans-evals = { path = "crates/cleverhans-evals", version = "0.2.0" }
 cleverhans-codegen = { path = "crates/cleverhans-codegen", version = "0.2.0" }
 cleverhans = { path = "crates/cleverhans", version = "0.2.0" }

@@ -17,8 +17,9 @@ backend and implementing four webhook endpoints. Drop the chat UI into
 
 ## See it in two minutes
 
-All you need is a Rust toolchain and a model — either an Anthropic API key or
-a local [Ollama](https://ollama.com) daemon (zero egress):
+All you need is a Rust toolchain and a model — an Anthropic API key, a local
+[Ollama](https://ollama.com) daemon (zero egress), or your own
+OpenAI-compatible server such as [vLLM](https://docs.vllm.ai):
 
 ```sh
 git clone https://github.com/2commits/cleverhans && cd cleverhans
@@ -26,6 +27,8 @@ git clone https://github.com/2commits/cleverhans && cd cleverhans
 ANTHROPIC_API_KEY=sk-... cargo run -p cleverhans-demo -- serve
 # or fully local:
 OLLAMA_MODEL=qwen3       cargo run -p cleverhans-demo -- serve
+# or your own server (vLLM, SGLang, NIM, …):
+OPENAI_BASE_URL=http://localhost:8000/v1 OPENAI_MODEL=<model> cargo run -p cleverhans-demo -- serve
 ```
 
 Open <http://127.0.0.1:8787> and try:

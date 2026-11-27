@@ -76,6 +76,16 @@ export function pickLlm(): ConstructorParameters<typeof Agent>[0]["llm"] {
   if (model) {
     return { provider: "ollama", model };
   }
+  const { OPENAI_BASE_URL: baseUrl, OPENAI_MODEL: openAiModel } = process.env;
+  if (baseUrl && openAiModel) {
+    // An OpenAI-compatible server such as vLLM.
+    return {
+      provider: "openai",
+      model: openAiModel,
+      base_url: baseUrl,
+      ...(process.env.OPENAI_API_KEY ? { api_key: process.env.OPENAI_API_KEY } : {}),
+    };
+  }
   console.log("(no provider configured — using the scripted model)\n");
   return {
     provider: "scripted",

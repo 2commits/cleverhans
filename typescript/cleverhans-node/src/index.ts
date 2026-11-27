@@ -47,6 +47,7 @@ export type SlotTable = Record<
 export type LlmOption =
   | { provider: "anthropic"; api_key: string; model?: string }
   | { provider: "ollama"; model: string; base_url?: string }
+  | { provider: "openai"; model: string; base_url: string; api_key?: string }
   | { provider: "scripted"; script: unknown[][] }
   | ((request: JsonObject) => unknown | Promise<unknown>);
 

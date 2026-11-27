@@ -8,7 +8,7 @@
 //! then connect a WebSocket client to ws://127.0.0.1:8790/agent (the
 //! `@cleverhans/react` transport, `websocat`, ...). For a live model swap
 //! [`ScriptedLlm`] for `cleverhans::llm::from_env()?` (features `anthropic`
-//! / `ollama`).
+//! / `ollama` / `openai`).
 
 use std::sync::Arc;
 
@@ -84,7 +84,8 @@ fn agent() -> Arc<Agent<User>> {
         .expect("registry is valid");
 
     // Scripted model: every user message proposes `record.archive`. Swap for
-    // `cleverhans::llm::from_env()?` to talk to Anthropic or Ollama.
+    // `cleverhans::llm::from_env()?` to talk to Anthropic, Ollama, or an
+    // OpenAI-compatible server such as vLLM.
     let llm = Arc::new(ScriptedLlm::new(std::iter::repeat_n(
         vec![CompletionItem::ToolCall {
             name: "record.archive".to_owned(),

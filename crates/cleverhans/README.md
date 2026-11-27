@@ -32,7 +32,8 @@ cargo run -p cleverhans --example mount_axum --features "ws test-util"
 ```
 
 Features (all off by default; the core protocol is always there): `ws` (axum
-WebSocket binding), `anthropic` / `ollama` (LLM providers + `llm::from_env`),
+WebSocket binding), `anthropic` / `ollama` / `openai` (LLM providers +
+`llm::from_env`; `openai` speaks to any OpenAI-compatible server such as vLLM),
 `evals` (action-mapping eval harness), `test-util` (deterministic doubles).
 
 Protocol spec and integration guides:

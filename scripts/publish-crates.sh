@@ -20,6 +20,7 @@ CRATES=(
   cleverhans-ws
   cleverhans-llm-anthropic
   cleverhans-llm-ollama
+  cleverhans-llm-openai
   cleverhans-evals
   cleverhans-codegen
   cleverhans

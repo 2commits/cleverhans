@@ -42,6 +42,23 @@
 - **Everything re-validates at confirm time** — authz and dry-run run twice
   (propose + confirm). Slow dry-runs are felt twice; keep them cheap.
 
+## OpenAI-compatible servers (vLLM & co.)
+
+- **`400 … "auto" tool choice requires --enable-auto-tool-choice and
+  --tool-call-parser to be set`** — every CleverHans request carries tools,
+  and vLLM serves tool calls only when started with
+  `--enable-auto-tool-choice --tool-call-parser <parser>`. Pick the parser
+  for your model from vLLM's
+  [tool-calling page](https://docs.vllm.ai/en/latest/features/tool_calling/).
+- **The model's reasoning (`<think>…</think>`, or a stray `</think>`) shows up
+  in the chat** — the server has no reasoning parser, so the reasoning stays
+  in `content` and looks like the answer. Start vLLM with the model's
+  `--reasoning-parser` (`qwen3` for Qwen3); the reasoning then moves to a
+  separate field that CleverHans ignores.
+- **`returned 301`/`302`/`307`** — the provider follows no redirects, so an
+  API key never travels to another host. Point `base_url` at the final URL,
+  version path included (`http://host:8000/v1`).
+
 ## Transport
 
 - **Socket closes right after connect** — init-first violation (spec §6.1):
