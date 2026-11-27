@@ -5,7 +5,7 @@ use crate::JsonMap;
 use crate::envelope::{Context, DryRunPreview};
 use crate::error::ValidationFailure;
 use crate::registry::{ParamSource, Registry};
-use crate::seams::{AuthzDecision, AuthzResolver, ContextParamResolver};
+use crate::seams::{AuthzDecision, AuthzResolver, ContextParamResolver, Mandate, MandateDecision};
 
 /// A model tool call, before validation: the action it selected plus its
 /// utterance-sourced arguments. Context-sourced params are filled by the
@@ -38,25 +38,29 @@ pub struct ValidatedAction {
 pub struct Validator<'a, P> {
     registry: &'a Registry<P>,
     authz: &'a dyn AuthzResolver<P>,
+    mandate: &'a dyn Mandate<P>,
     context_params: &'a dyn ContextParamResolver,
 }
 
 impl<'a, P> Validator<'a, P> {
-    /// Assembles a validator over the given seams.
+    /// Assembles a validator over the given seams. Apps without a delegation
+    /// contract pass [`crate::seams::NoMandate`].
     pub fn new(
         registry: &'a Registry<P>,
         authz: &'a dyn AuthzResolver<P>,
+        mandate: &'a dyn Mandate<P>,
         context_params: &'a dyn ContextParamResolver,
     ) -> Self {
         Self {
             registry,
             authz,
+            mandate,
             context_params,
         }
     }
 
     /// Runs the full spec §7.1 pipeline: existence, param fill + typecheck,
-    /// authorization, dry-run, slot typecheck.
+    /// authorization, dry-run, mandate, slot typecheck.
     ///
     /// # Errors
     ///
@@ -103,6 +107,24 @@ impl<'a, P> Validator<'a, P> {
         } else {
             None
         };
+
+        // §9.8: after the dry-run so blast-radius rules can read the
+        // preview, before slot build so a denied card is never even phrased.
+        // Runs in addition to the authz check above — effective permission
+        // is authorize ∧ mandate, and a mandate can only ever narrow.
+        match self
+            .mandate
+            .mandate(principal, &def.id, &params, preview.as_ref())
+            .await
+        {
+            MandateDecision::Allow => {}
+            MandateDecision::Deny(reason) => {
+                return Err(ValidationFailure::OutOfMandate {
+                    action_id: def.id.clone(),
+                    reason,
+                });
+            }
+        }
 
         let slots = if let Some(builder) = registration.async_slots.as_ref() {
             // §14.9 semantics: a card whose content could not be built is
@@ -201,8 +223,9 @@ mod tests {
     use super::*;
     use crate::error::HandlerError;
     use crate::registry::{ActionDef, BlockDef, ParamSpec, SlotSpec, ValueType};
-    use crate::seams::{ActionHandler, DryRunHandler, SlotBuilder};
+    use crate::seams::{ActionHandler, DryRunHandler, NoMandate, SlotBuilder};
 
+    #[derive(Clone)]
     struct User {
         allowed: bool,
     }
@@ -342,7 +365,7 @@ mod tests {
         #[tokio::test]
         async fn fills_context_param_from_snapshot() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
 
             let validated = validator
                 .validate(
@@ -359,7 +382,7 @@ mod tests {
         #[tokio::test]
         async fn attaches_dry_run_preview_for_mutating_action() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
 
             let validated = validator
                 .validate(
@@ -380,7 +403,7 @@ mod tests {
         #[tokio::test]
         async fn rejects_unknown_action() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
             let unknown = CandidateAction {
                 action_id: "made.up".to_owned(),
                 utterance_params: JsonMap::new(),
@@ -399,7 +422,7 @@ mod tests {
         #[tokio::test]
         async fn rejects_model_writing_context_param() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
             let mut params = JsonMap::new();
             params.insert("recordId".to_owned(), json!("rec_666"));
 
@@ -420,7 +443,7 @@ mod tests {
         #[tokio::test]
         async fn rejects_mistyped_utterance_param() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
             let mut params = JsonMap::new();
             params.insert("country".to_owned(), json!(42));
 
@@ -441,7 +464,7 @@ mod tests {
         #[tokio::test]
         async fn rejects_unauthorized_principal() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
 
             let result = validator
                 .validate(
@@ -539,7 +562,7 @@ mod tests {
         #[tokio::test]
         async fn async_slot_builder_receives_the_preview() {
             let registry = async_slots_registry(PreviewTitle);
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
 
             let validated = validator
                 .validate(
@@ -556,7 +579,7 @@ mod tests {
         #[tokio::test]
         async fn async_slot_failure_fails_closed() {
             let registry = async_slots_registry(FailingSlots);
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
 
             let failure = validator
                 .validate(
@@ -575,9 +598,95 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn out_of_mandate_candidate_is_invalid_and_never_retried() {
+            let registry = registry();
+            // The closure blanket impl of `Mandate`, keeping it covered.
+            let no_removals = |_: User, action_id: String, _: JsonMap, _: Option<DryRunPreview>| async move {
+                MandateDecision::Deny(format!("`{action_id}` was never delegated to the agent"))
+            };
+            let validator = Validator::new(&registry, &KeyAuthz, &no_removals, &SelectionResolver);
+
+            let failure = validator
+                .validate(
+                    &candidate(JsonMap::new()),
+                    &context_with_selection(),
+                    &User { allowed: true },
+                )
+                .await
+                .expect_err("mandate deny must invalidate");
+
+            assert!(
+                matches!(failure, ValidationFailure::OutOfMandate { .. }),
+                "got {failure:?}"
+            );
+            assert!(
+                !failure.is_model_fixable(),
+                "no rephrasing widens a mandate"
+            );
+        }
+
+        #[tokio::test]
+        async fn mandate_reads_the_dry_run_preview_for_blast_radius_rules() {
+            let registry = registry();
+            // Cap of zero: the dry-run reports affected_count 1, so a deny
+            // proves the mandate ran after the dry-run step with the
+            // preview in hand (§9.8 ordering).
+            let cap = |_: User, _: String, _: JsonMap, preview: Option<DryRunPreview>| async move {
+                match preview {
+                    Some(preview) if preview.affected_count > 0 => MandateDecision::Deny(format!(
+                        "touches {} records, mandate allows none",
+                        preview.affected_count
+                    )),
+                    _ => MandateDecision::Allow,
+                }
+            };
+            let validator = Validator::new(&registry, &KeyAuthz, &cap, &SelectionResolver);
+
+            let failure = validator
+                .validate(
+                    &candidate(JsonMap::new()),
+                    &context_with_selection(),
+                    &User { allowed: true },
+                )
+                .await
+                .expect_err("blast-radius deny must invalidate");
+
+            assert!(
+                matches!(
+                    failure,
+                    ValidationFailure::OutOfMandate { ref reason, .. }
+                        if reason.contains("touches 1 records")
+                ),
+                "got {failure:?}"
+            );
+        }
+
+        #[tokio::test]
+        async fn mandate_runs_in_addition_to_authz_never_instead() {
+            let registry = registry();
+            // An allow-everything mandate must not rescue an authz denial:
+            // effective permission is authorize ∧ mandate (§9.8).
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
+
+            let failure = validator
+                .validate(
+                    &candidate(JsonMap::new()),
+                    &context_with_selection(),
+                    &User { allowed: false },
+                )
+                .await
+                .expect_err("authz deny must survive an allow-all mandate");
+
+            assert!(
+                matches!(failure, ValidationFailure::Unauthorized { .. }),
+                "got {failure:?}"
+            );
+        }
+
+        #[tokio::test]
         async fn rejects_when_required_context_param_unresolvable() {
             let registry = registry();
-            let validator = Validator::new(&registry, &KeyAuthz, &SelectionResolver);
+            let validator = Validator::new(&registry, &KeyAuthz, &NoMandate, &SelectionResolver);
             let no_selection = Context {
                 route: "/records".to_owned(),
                 ..Context::default()
