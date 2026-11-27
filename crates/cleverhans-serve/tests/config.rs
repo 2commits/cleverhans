@@ -250,6 +250,81 @@ fn llm_section_resolves_and_refuses() {
     );
 }
 
+mod openai_provider {
+    use cleverhans::llm::LlmSpec;
+
+    use super::{BASE, Config, ConfigError};
+
+    fn with_llm(llm: &str) -> Config {
+        Config::from_toml(&BASE.replace("provider = \"scripted\"\nscript = []", llm))
+            .expect("parses")
+    }
+
+    #[test]
+    fn resolves_without_a_key_when_no_key_env_is_named() {
+        let config = with_llm(
+            "provider = \"openai\"\nmodel = \"qwen\"\nbase_url = \"http://localhost:8000/v1\"",
+        );
+
+        let spec = config.llm.resolve().expect("resolves");
+
+        assert!(matches!(
+            spec,
+            LlmSpec::OpenAi { ref model, ref base_url, api_key: None }
+                if model == "qwen" && base_url == "http://localhost:8000/v1"
+        ));
+    }
+
+    #[test]
+    fn requires_model_and_base_url() {
+        let no_base_url = with_llm("provider = \"openai\"\nmodel = \"qwen\"");
+        let no_model = with_llm("provider = \"openai\"\nbase_url = \"http://localhost:8000/v1\"");
+
+        let err = no_base_url.llm.resolve().expect_err("no base_url");
+        assert!(
+            matches!(err, ConfigError::Llm(ref msg) if msg.contains("base_url")),
+            "got {err}"
+        );
+        let err = no_model.llm.resolve().expect_err("no model");
+        assert!(
+            matches!(err, ConfigError::Llm(ref msg) if msg.contains("model")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn a_named_key_env_supplies_the_key() {
+        // SAFETY: test-only env mutation; the name is unique to this test.
+        unsafe { std::env::set_var("CFG_TEST_OPENAI_KEY", "sk-local") };
+        let config = with_llm(
+            "provider = \"openai\"\nmodel = \"qwen\"\nbase_url = \"http://localhost:8000/v1\"\n\
+             api_key_env = \"CFG_TEST_OPENAI_KEY\"",
+        );
+
+        let spec = config.llm.resolve().expect("resolves");
+
+        assert!(matches!(
+            spec,
+            LlmSpec::OpenAi { api_key: Some(ref key), .. } if key == "sk-local"
+        ));
+    }
+
+    #[test]
+    fn a_named_key_env_must_exist() {
+        let config = with_llm(
+            "provider = \"openai\"\nmodel = \"qwen\"\nbase_url = \"http://localhost:8000/v1\"\n\
+             api_key_env = \"CFG_TEST_NO_SUCH_OPENAI_KEY\"",
+        );
+
+        let err = config.llm.resolve().expect_err("missing key env");
+
+        assert!(
+            matches!(err, ConfigError::MissingEnv(ref name, _) if name == "CFG_TEST_NO_SUCH_OPENAI_KEY"),
+            "got {err}"
+        );
+    }
+}
+
 // Endpoint precedence is tested through the pure `resolve_endpoint`:
 // mutating the process environment races every other test thread reading
 // it (which is why `set_var` is `unsafe` in edition 2024).

@@ -21,6 +21,16 @@ function pickLlm() {
   if (process.env.OLLAMA_MODEL) {
     return { provider: "ollama", model: process.env.OLLAMA_MODEL };
   }
+  const { OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_API_KEY } = process.env;
+  if (OPENAI_BASE_URL && OPENAI_MODEL) {
+    // An OpenAI-compatible server such as vLLM.
+    return {
+      provider: "openai",
+      model: OPENAI_MODEL,
+      base_url: OPENAI_BASE_URL,
+      ...(OPENAI_API_KEY ? { api_key: OPENAI_API_KEY } : {}),
+    };
+  }
   console.log("(no provider configured — using the scripted model)");
   return {
     provider: "scripted",

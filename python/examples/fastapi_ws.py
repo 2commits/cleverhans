@@ -10,6 +10,7 @@ Run (needs `pip install fastapi "uvicorn[standard]"` in the venv — the
 
     ANTHROPIC_API_KEY=sk-... uvicorn fastapi_ws:app --port 8789
     OLLAMA_MODEL=qwen3       uvicorn fastapi_ws:app --port 8789
+    OPENAI_BASE_URL=http://localhost:8000/v1 OPENAI_MODEL=<model> uvicorn fastapi_ws:app --port 8789
 
 then point a client at ws://127.0.0.1:8789/agent. Without a provider the
 scripted model proposes `doc.publish` for every message.
@@ -32,6 +33,12 @@ def pick_llm():
         return {"provider": "anthropic", "api_key": key}
     if model := os.environ.get("OLLAMA_MODEL"):
         return {"provider": "ollama", "model": model}
+    base_url, model = os.environ.get("OPENAI_BASE_URL"), os.environ.get("OPENAI_MODEL")
+    if base_url and model:  # an OpenAI-compatible server such as vLLM
+        spec = {"provider": "openai", "model": model, "base_url": base_url}
+        if key := os.environ.get("OPENAI_API_KEY"):
+            spec["api_key"] = key
+        return spec
     return {
         "provider": "scripted",
         "script": [[{"tool_call": {"name": "doc.publish", "arguments": {}}}]] * 8,

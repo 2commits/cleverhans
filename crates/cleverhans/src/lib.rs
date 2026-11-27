@@ -24,8 +24,9 @@
 //! Feature map (all off by default; the core protocol is always there):
 //!
 //! - `ws` — WebSocket + JSON binding for axum ([`ws`])
-//! - `anthropic` / `ollama` — LLM providers ([`anthropic`], [`ollama`]) and
-//!   the [`llm::from_env`] bootstrap
+//! - `anthropic` / `ollama` / `openai` — LLM providers ([`anthropic`],
+//!   [`ollama`], [`openai`]: OpenAI-compatible servers such as vLLM) and the
+//!   [`llm::from_env`] bootstrap
 //! - `evals` — action-mapping eval harness ([`evals`])
 //! - `test-util` — deterministic doubles ([`test_util`]) for offline tests
 
@@ -49,11 +50,21 @@ pub use cleverhans_llm_anthropic as anthropic;
 #[cfg(feature = "ollama")]
 pub use cleverhans_llm_ollama as ollama;
 
+/// The OpenAI-compatible Chat Completions provider — vLLM, SGLang, NIM,
+/// hosted compatible APIs (feature `openai`).
+#[cfg(feature = "openai")]
+pub use cleverhans_llm_openai as openai;
+
 /// The action-mapping eval harness (feature `evals`).
 #[cfg(feature = "evals")]
 pub use cleverhans_evals as evals;
 
-#[cfg(any(feature = "anthropic", feature = "ollama", feature = "test-util"))]
+#[cfg(any(
+    feature = "anthropic",
+    feature = "ollama",
+    feature = "openai",
+    feature = "test-util"
+))]
 pub mod llm;
 
 /// Everything an integration typically names, one glob away.
@@ -85,6 +96,9 @@ pub mod prelude {
     #[cfg(feature = "ollama")]
     pub use cleverhans_llm_ollama::{OllamaConfig, OllamaProvider};
 
-    #[cfg(any(feature = "anthropic", feature = "ollama"))]
+    #[cfg(feature = "openai")]
+    pub use cleverhans_llm_openai::{OpenAiConfig, OpenAiProvider};
+
+    #[cfg(any(feature = "anthropic", feature = "ollama", feature = "openai"))]
     pub use crate::llm::from_env;
 }

@@ -38,9 +38,16 @@ forward_headers = ["authorization", "cookie"]
 endpoint = "POST /internal/cleverhans/authorize"
 
 [llm]
-provider = "anthropic"      # anthropic | ollama | scripted
+provider = "anthropic"      # anthropic | ollama | openai | scripted
 # model = "claude-sonnet-5"
 # api_key_env = "ANTHROPIC_API_KEY"
+#
+# An OpenAI-compatible server (vLLM, SGLang, NIM, …): model and base_url
+# (with the version path) are required; api_key_env is optional.
+# provider = "openai"
+# model = "Qwen/Qwen3-32B"
+# base_url = "http://localhost:8000/v1"
+# api_key_env = "OPENAI_API_KEY"
 
 # OTLP metrics export (spec'd metric set in docs/hosting-webhooks.md).
 # Off unless an endpoint is set here or via OTEL_EXPORTER_OTLP_ENDPOINT.

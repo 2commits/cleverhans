@@ -15,7 +15,7 @@ path = "src/main.rs"
 anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
 clap = { version = "4", features = ["derive"] }
-cleverhans = { workspace = true, features = ["anthropic", "ollama", "test-util"] }
+cleverhans = { workspace = true, features = ["anthropic", "ollama", "openai", "test-util"] }
 cleverhans-conformance = { workspace = true }
 cleverhans-core = { workspace = true }
 cleverhans-webhook = { workspace = true }

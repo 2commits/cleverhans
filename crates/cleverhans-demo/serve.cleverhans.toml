@@ -37,6 +37,8 @@ endpoint = "POST /cleverhans/authorize"
 
 [llm]
 provider = "anthropic"          # or: provider = "ollama", model = "qwen3"
+# or an OpenAI-compatible server such as vLLM:
+# provider = "openai", model = "<model>", base_url = "http://localhost:8000/v1"
 
 # OTLP metrics export (spec'd metric set in docs/hosting-webhooks.md).
 # Off unless an endpoint is set here or via OTEL_EXPORTER_OTLP_ENDPOINT.

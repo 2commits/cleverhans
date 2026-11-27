@@ -20,6 +20,9 @@ agent = cleverhans_agent.Agent(
     slot_builders={"doc.publish": lambda params, preview: {"title": "Publish document"}},
     authorize=authorize,                 # None/True allow, str denies with reason
     llm={"provider": "anthropic", "api_key": os.environ["ANTHROPIC_API_KEY"]},
+    # or your own OpenAI-compatible server (vLLM, SGLang, NIM, …):
+    # llm={"provider": "openai", "model": "<model>",
+    #      "base_url": "http://localhost:8000/v1"},   # + "api_key" if needed
 )
 
 app = FastAPI()

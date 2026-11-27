@@ -273,6 +273,7 @@ dependencies = [
  "cleverhans-evals",
  "cleverhans-llm-anthropic",
  "cleverhans-llm-ollama",
+ "cleverhans-llm-openai",
  "cleverhans-ws",
  "serde",
  "serde_json",
@@ -406,6 +407,19 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "cleverhans-llm-openai"
+version = "0.2.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "cleverhans-core",
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

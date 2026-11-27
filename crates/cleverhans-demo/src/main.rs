@@ -3,6 +3,7 @@
 //! ```text
 //! ANTHROPIC_API_KEY=... cargo run -p cleverhans-demo -- serve
 //! OLLAMA_MODEL=qwen3    cargo run -p cleverhans-demo -- serve
+//! OPENAI_BASE_URL=http://localhost:8000/v1 OPENAI_MODEL=<model> cargo run -p cleverhans-demo -- serve
 //! ANTHROPIC_API_KEY=... cargo run -p cleverhans-demo -- eval crates/cleverhans-demo/eval-cases.json
 //! cargo run -p cleverhans-demo -- host   # §14 webhook host for `cleverhans serve`
 //! ```
@@ -41,7 +42,8 @@ fn agent(store: &Store) -> anyhow::Result<Arc<Agent<DemoUser>>> {
     };
     Ok(Arc::new(Agent::with_config(
         Arc::new(build_registry(store)),
-        // OLLAMA_MODEL wins, then ANTHROPIC_API_KEY (+ optional
+        // OLLAMA_MODEL wins, then OPENAI_BASE_URL + OPENAI_MODEL (+ optional
+        // OPENAI_API_KEY), then ANTHROPIC_API_KEY (+ optional
         // ANTHROPIC_MODEL, e.g. claude-haiku-4-5 for a cheaper run).
         cleverhans::llm::from_env()?,
         Arc::new(AllowAll),

@@ -36,7 +36,9 @@ const agent = new Agent({
   authorize: (principal, actionId) =>
     principal.roles.includes("editor") ? null : "editors only",
   llm: { provider: "anthropic", api_key: process.env.ANTHROPIC_API_KEY },
-  // or { provider: "ollama", model: "qwen3" }, a {provider: "scripted"}
+  // or { provider: "ollama", model: "qwen3" }, an OpenAI-compatible server
+  // such as vLLM: { provider: "openai", model, base_url:
+  // "http://localhost:8000/v1", api_key? }, a {provider: "scripted"}
   // script for tests, or an async callback for a custom gateway
 });
 

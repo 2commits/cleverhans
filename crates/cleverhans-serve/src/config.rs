@@ -171,15 +171,17 @@ pub struct AuthzSection {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LlmSection {
-    /// `anthropic` | `ollama` | `scripted`.
+    /// `anthropic` | `ollama` | `openai` | `scripted`.
     pub provider: String,
-    /// Model override (anthropic/ollama).
+    /// Model override (anthropic); model name (ollama, openai — required).
     #[serde(default)]
     pub model: Option<String>,
-    /// Env var holding the API key (anthropic; default `ANTHROPIC_API_KEY`).
+    /// Env var holding the API key (anthropic: default `ANTHROPIC_API_KEY`;
+    /// openai: optional, no key is sent when absent).
     #[serde(default)]
     pub api_key_env: Option<String>,
-    /// Daemon origin (ollama).
+    /// Daemon origin (ollama); API base including the version path (openai —
+    /// required, e.g. `http://localhost:8000/v1`).
     #[serde(default)]
     pub base_url: Option<String>,
     /// Scripted turns (scripted — keyless host-app CI).
@@ -192,8 +194,9 @@ impl LlmSection {
     ///
     /// # Errors
     ///
-    /// [`ConfigError`] on an unknown provider, a missing key env var, or a
-    /// scripted provider without a script.
+    /// [`ConfigError`] on an unknown provider, a missing key env var, a
+    /// missing `model`/`base_url` the provider requires, or a scripted
+    /// provider without a script.
     pub fn resolve(&self) -> Result<cleverhans::llm::LlmSpec, ConfigError> {
         match self.provider.as_str() {
             "anthropic" => {
@@ -212,6 +215,27 @@ impl LlmSection {
                     .ok_or_else(|| ConfigError::Llm("ollama requires `model`".to_owned()))?,
                 base_url: self.base_url.clone(),
             }),
+            "openai" => {
+                let model = self
+                    .model
+                    .clone()
+                    .ok_or_else(|| ConfigError::Llm("openai requires `model`".to_owned()))?;
+                let base_url = self
+                    .base_url
+                    .clone()
+                    .ok_or_else(|| ConfigError::Llm("openai requires `base_url`".to_owned()))?;
+                let api_key = match self.api_key_env.as_deref() {
+                    Some(env_name) => Some(std::env::var(env_name).map_err(|_| {
+                        ConfigError::MissingEnv(env_name.to_owned(), "llm.api_key_env")
+                    })?),
+                    None => None,
+                };
+                Ok(cleverhans::llm::LlmSpec::OpenAi {
+                    model,
+                    base_url,
+                    api_key,
+                })
+            }
             "scripted" => Ok(cleverhans::llm::LlmSpec::Scripted {
                 script: self
                     .script
@@ -219,7 +243,7 @@ impl LlmSection {
                     .ok_or_else(|| ConfigError::Llm("scripted requires `script`".to_owned()))?,
             }),
             other => Err(ConfigError::Llm(format!(
-                "unknown provider `{other}` (anthropic | ollama | scripted)"
+                "unknown provider `{other}` (anthropic | ollama | openai | scripted)"
             ))),
         }
     }

@@ -42,6 +42,12 @@ def pick_llm():
         return {"provider": "anthropic", "api_key": key}
     if model := os.environ.get("OLLAMA_MODEL"):
         return {"provider": "ollama", "model": model}
+    base_url, model = os.environ.get("OPENAI_BASE_URL"), os.environ.get("OPENAI_MODEL")
+    if base_url and model:  # an OpenAI-compatible server such as vLLM
+        spec = {"provider": "openai", "model": model, "base_url": base_url}
+        if key := os.environ.get("OPENAI_API_KEY"):
+            spec["api_key"] = key
+        return spec
     return {
         "provider": "scripted",
         "script": [[{"tool_call": {"name": "record.archive", "arguments": {}}}]],

@@ -1,0 +1,20 @@
+[package]
+name = "cleverhans-llm-openai"
+description = "OpenAI-compatible Chat Completions provider (vLLM, SGLang, NIM, hosted APIs) for the CleverHans LlmProvider seam"
+version.workspace = true
+readme = "README.md"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+cleverhans-core = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

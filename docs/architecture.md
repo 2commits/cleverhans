@@ -15,7 +15,8 @@ all three to prove it.
         transports         │            │           providers
   ┌───────────────┐  ┌─────┴─────┐  ┌───┴──────────────────┐
   │ cleverhans-ws  │  │ ws-core   │  │ llm-anthropic /       │
-  │ (axum)         │  │ (neutral) │  │ llm-ollama            │
+  │ (axum)         │  │ (neutral) │  │ llm-ollama /          │
+  │                │  │           │  │ llm-openai            │
   └───────────────┘  └─────┬─────┘  └──────────────────────┘
                            │
                     ┌──────┴───────┐
@@ -30,13 +31,15 @@ all three to prove it.
 ```
 
 - **`cleverhans`** (crates.io) — the facade: one dependency line, one
-  prelude; `ws` / `anthropic` / `ollama` / `evals` / `test-util` features.
+  prelude; `ws` / `anthropic` / `ollama` / `openai` / `evals` / `test-util`
+  features. `openai` speaks the OpenAI-compatible Chat Completions API
+  (vLLM, SGLang, NIM, hosted compatible APIs).
 - **`cleverhans-ws-core` → `cleverhans-ws`** — a framework-neutral
   JSON-frame session loop, and the axum adapter over it. `cleverhans-grpc`
   is the gRPC binding (envelope-only proto).
 - **`cleverhans-ffi`** — shared by both language bindings: principals as
-  JSON blobs, per-frame pumping, the `anthropic | ollama | scripted |
-  callback` provider factory, registry assembly from declarative documents,
+  JSON blobs, per-frame pumping, the `anthropic | ollama | openai |
+  scripted | callback` provider factory, registry assembly from declarative documents,
   and codegen. A knob added here is a knob added everywhere.
 - **Frontend** never touches the core: `@cleverhans/react` speaks the
   envelope over WebSocket; `@cleverhans/ui` is optional styled components

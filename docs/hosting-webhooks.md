@@ -151,7 +151,7 @@ verify = "POST /internal/cleverhans/verify-session"
 endpoint = "POST /internal/cleverhans/authorize"
 
 [llm]
-provider = "anthropic"                 # or ollama (zero egress), or scripted (CI)
+provider = "anthropic"                 # or ollama (zero egress), openai (vLLM & co.), or scripted (CI)
 
 [actions."*"]                          # {action} substituted per action ID
 execute = "POST /internal/cleverhans/{action}/execute"

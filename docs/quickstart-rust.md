@@ -65,7 +65,7 @@ let registry = RegistryBuilder::from_schema(schema)
 
 let agent = Arc::new(Agent::new(
     Arc::new(registry),
-    cleverhans::llm::from_env()?,   // ANTHROPIC_API_KEY or OLLAMA_MODEL
+    cleverhans::llm::from_env()?,   // ANTHROPIC_API_KEY, OLLAMA_MODEL, or OPENAI_*
     Arc::new(AllowAll),             // or a closure / trait impl over your permissions
     Arc::new(context_resolver),
 ));
@@ -76,6 +76,12 @@ preview users confirm against; `.build()` rejects otherwise. Handlers are
 closures, structs (`#[async_trait] impl ActionHandler<P>` — `async_trait` is
 re-exported from the prelude), or `typed_handler` over codegen'd param
 structs (see [Adding an action](adding-actions.md)).
+
+`from_env` takes the first provider it finds: `OLLAMA_MODEL` (feature
+`ollama`), then `OPENAI_BASE_URL` + `OPENAI_MODEL` (feature `openai`, any
+OpenAI-compatible server — e.g. vLLM:
+`OPENAI_BASE_URL=http://localhost:8000/v1 OPENAI_MODEL=<model>`, plus
+`OPENAI_API_KEY` if the server wants one), then `ANTHROPIC_API_KEY`.
 
 ## 3. Mount
 

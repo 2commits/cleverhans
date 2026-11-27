@@ -1,7 +1,7 @@
 name: Release
 
 # Publishes on version tags (v0.1.0):
-#   crates.io — the 11 publishable crates (publish = false crates are skipped)
+#   crates.io — the 12 publishable crates (publish = false crates are skipped)
 #   npm       — @cleverhans/react, @cleverhans/ui, @cleverhans/node (+ per-platform binaries)
 #   PyPI      — cleverhans-hitl abi3 wheels (linux x64/arm64, macOS x64/arm64, windows x64) + sdist
 #   GitHub    — `cleverhans` service binaries (5 platforms + linux musl) as release assets
