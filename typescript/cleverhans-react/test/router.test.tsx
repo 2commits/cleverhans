@@ -48,6 +48,16 @@ describe("PendingProposals + BlockRouter", () => {
     expect(screen.getByText("Remove co-buyer Jane Doe")).toBeDefined();
   });
 
+  it("an empty preview reports an affected count of 0", () => {
+    const { transport, session, emit } = openSession();
+    const { container } = mount(transport, session);
+
+    emit({ ...proposalEvent("prop-1"), preview: {} });
+
+    const preview = container.querySelector("[data-cleverhans-preview]");
+    expect(preview?.getAttribute("data-affected-count")).toBe("0");
+  });
+
   it("renders nothing for an unregistered block type (fail closed)", () => {
     const { transport, session, emit } = openSession();
     const { container } = mount(transport, session);

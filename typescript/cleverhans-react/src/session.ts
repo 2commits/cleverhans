@@ -254,7 +254,8 @@ export class AgentSession {
         break;
       }
       case "action_proposal": {
-        const { type: _tag, ...proposal } = event;
+        // The message is the proposal: its fields sit beside `type`.
+        const proposal: ActionProposal = event;
         if (!this.#views.has(proposal.proposal_id)) {
           this.#order.push(proposal.proposal_id);
         }

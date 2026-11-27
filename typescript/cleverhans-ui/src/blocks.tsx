@@ -84,8 +84,9 @@ export function BulkPreviewBlock(props: BlockProps): ReactNode {
         {(preview) => (
           <>
             <span>
-              Affects <strong>{preview.affected_count}</strong>{" "}
-              {preview.affected_count === 1 ? "record" : "records"}
+              {/* An absent affected_count means 0 (spec §6.4). */}
+              Affects <strong>{preview.affected_count ?? 0}</strong>{" "}
+              {(preview.affected_count ?? 0) === 1 ? "record" : "records"}
               {preview.summary ? ` — ${preview.summary}` : ""}
             </span>
             {preview.sample_ids && preview.sample_ids.length > 0 && (

@@ -3,10 +3,18 @@ export {
   type ActionProposal,
   type AgentTransport,
   type AppContext,
+  type ChatMessage,
   type ClientEvent,
+  type ConfirmAction,
+  type ContextUpdate,
   type DryRunPreview,
+  type ErrorMessage,
+  type Init,
   type ProposalLifecycleState,
+  type ProposalStateChanged,
+  type RejectAction,
   type ServerEvent,
+  type UserMessage,
 } from "./envelope";
 export {
   AgentSession,
