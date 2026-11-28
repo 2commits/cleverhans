@@ -57,6 +57,7 @@ The wire-visible registry (blocks, actions, params, context mappings — everyth
 - `source: "context"` params are filled by the framework from `context_params` (a param → context-path map: `route`, `selected_record_id`, `view_type`, `params.<key>`, `extensions.<key>`); the model never sees or writes them. `source: "utterance"` params are the only ones exposed to the model.
 - Every `mutates: true` action must have a dry-run handler; `.build()` rejects otherwise. A non-mutating action with a dry-run is also rejected.
 - Avoid `__` in action ids — LLM providers mangle `.` → `__` for tool-name rules.
+- An optional top-level `"$schema"` key may point at the document's JSON Schema (`spec/schemas/registry.json` in the CleverHans repo, or a local copy) for editor validation and autocomplete; the loader accepts it and carries it through unchanged.
 
 Building programmatically instead (`Registry::builder().block(...).action(...)`) is still supported and interchangeable — `.context_param(name, path)` sets the mapping.
 

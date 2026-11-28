@@ -29,6 +29,12 @@ Rules that bite:
   the model, not for docs.
 - Avoid `__` in action ids (LLM tool-name rules mangle `.` to `__`).
 
+For validation and autocomplete in your editor, name the document's JSON
+Schema in a top-level `"$schema"` key, e.g. `"$schema":
+"../../spec/schemas/registry.json"` — a path to `spec/schemas/registry.json`
+or a local copy of it. The framework carries the key through and never
+fetches it ([`spec/schemas/README.md`](../spec/schemas/README.md)).
+
 Optionally add `display` so the action shows up in the app's command palette
 (spec §4.3). The agent ignores it; `palette::match_actions` matches on it:
 

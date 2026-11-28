@@ -21,6 +21,15 @@ use crate::seams::ContextParamResolver;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegistrySchema {
+    /// The document's top-level `"$schema"` key: an optional URI reference
+    /// of the JSON Schema that describes it (`spec/schemas/registry.json`),
+    /// so editors validate and autocomplete the file. The framework never
+    /// fetches or interprets it; it is carried through
+    /// [`crate::registry::RegistryBuilder::from_schema`] and
+    /// [`crate::registry::Registry::schema`] unchanged, so a loaded
+    /// document exports as it was written.
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub schema_uri: Option<String>,
     /// Spec version the document targets; checked against
     /// [`crate::SPEC_VERSION`] by major.minor prefix, mirroring the `Init`
     /// handshake (§13).
@@ -242,6 +251,30 @@ mod tests {
             RegistrySchema::from_json(&schema.to_json_pretty()).expect("canonical JSON is valid");
 
         assert_eq!(schema, reparsed);
+    }
+
+    #[test]
+    fn carries_a_schema_reference_through_and_writes_it_first() {
+        let doc = document().replacen('{', r#"{"$schema": "../spec/schemas/registry.json","#, 1);
+
+        let schema = RegistrySchema::from_json(&doc).expect("valid document");
+        let json = schema.to_json_pretty();
+
+        assert_eq!(
+            schema.schema_uri.as_deref(),
+            Some("../spec/schemas/registry.json")
+        );
+        assert!(
+            json.starts_with("{\n  \"$schema\": \"../spec/schemas/registry.json\",\n"),
+            "`$schema` must serialize first: {json}"
+        );
+    }
+
+    #[test]
+    fn omits_an_absent_schema_reference() {
+        let schema = RegistrySchema::from_json(&document()).expect("valid document");
+
+        assert!(!schema.to_json_pretty().contains("$schema"));
     }
 
     #[test]

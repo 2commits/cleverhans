@@ -1,4 +1,5 @@
 {
+  "$schema": "../../spec/schemas/registry.json",
   "spec_version": "0.1",
   "blocks": [
     {

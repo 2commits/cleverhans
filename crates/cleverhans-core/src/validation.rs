@@ -522,6 +522,7 @@ mod tests {
             builder: impl crate::seams::AsyncSlotBuilder<User> + 'static,
         ) -> Registry<User> {
             let schema = crate::schema::RegistrySchema {
+                schema_uri: None,
                 spec_version: crate::SPEC_VERSION.to_owned(),
                 blocks: vec![BlockDef {
                     block_type: "confirm".to_owned(),
