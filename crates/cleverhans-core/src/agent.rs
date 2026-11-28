@@ -288,6 +288,20 @@ impl<P: Send + Sync> Agent<P> {
         context: Context,
         context_seq: u64,
     ) -> Vec<ServerEvent> {
+        // `context_seq` is client-monotonic (spec §6.2): an update that does
+        // not move past the last applied snapshot (`Init`'s is 0) is stale —
+        // reordered, replayed or from a confused client — and is not
+        // applied, so proposals never record a sequence that went backwards.
+        if context_seq <= session.context_seq {
+            return vec![ServerEvent::Error {
+                code: "stale_context".to_owned(),
+                message: format!(
+                    "context_seq {context_seq} is not greater than the last applied {}",
+                    session.context_seq
+                ),
+                recoverable: true,
+            }];
+        }
         // Route changes invalidate pending proposals (spec §7.4 SHOULD);
         // confirm-time revalidation remains the safety backstop either way.
         let route_changed = session.context.route != context.route;

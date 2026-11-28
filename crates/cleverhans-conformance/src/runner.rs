@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use cleverhans_core::envelope::ClientEvent;
-use cleverhans_ws_core::{FrameOutcome, FramePump};
+use cleverhans_ws_core::FramePump;
 
 use crate::fixture::{Fixture, Frame, Layer, Step, Vector, VectorPrincipal, build_agent};
 use crate::matcher::{Bindings, match_events, substitute};
@@ -82,15 +82,13 @@ async fn run_binding_layer(fixture: &Fixture, vector: &Vector) -> Result<(), Str
             Frame::Json(value) => value.to_string(),
             Frame::Raw(raw) => raw.clone(),
         };
-        let outcome = pump
-            .handle_frame(&agent, &frame, &mut |json: String| {
-                raw_events.push(json);
-                true
-            })
-            .await;
-        if outcome == FrameOutcome::Closed {
-            break; // the stream closed; a transport would read no further
-        }
+        // Frames after the end are still fed: a closed session must answer
+        // none of them (spec §6.3), and the exact `expect` list proves it.
+        pump.handle_frame(&agent, &frame, &mut |json: String| {
+            raw_events.push(json);
+            true
+        })
+        .await;
     }
     if vector.expect_close != pump.is_closed() {
         return Err(format!(

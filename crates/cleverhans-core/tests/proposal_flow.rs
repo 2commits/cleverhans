@@ -393,6 +393,111 @@ async fn route_change_expires_pending_proposal() {
     );
 }
 
+fn context_update(selected: &str, context_seq: u64) -> ClientEvent {
+    ClientEvent::ContextUpdate {
+        context: Context {
+            selected_record_id: Some(selected.to_owned()),
+            ..tx_context()
+        },
+        context_seq,
+    }
+}
+
+fn is_stale_context(events: &[ServerEvent]) -> bool {
+    matches!(
+        events,
+        [ServerEvent::Error { code, recoverable: true, .. }] if code == "stale_context"
+    )
+}
+
+#[tokio::test]
+async fn a_context_update_that_does_not_advance_the_sequence_is_refused_and_not_applied() {
+    let executions = Arc::new(Mutex::new(Vec::new()));
+    let agent = agent_with(ScriptedLlm::returning(tool_call()), Arc::clone(&executions));
+    let mut session = Session::new(User {
+        id: "alex",
+        can_remove_co_buyer: true,
+    });
+    open_session(&agent, &mut session).await;
+    let applied = agent
+        .handle(&mut session, context_update("tx_582", 3))
+        .await;
+    assert!(
+        applied.is_empty(),
+        "a growing sequence applies: {applied:?}"
+    );
+
+    let equal = agent
+        .handle(&mut session, context_update("tx_999", 3))
+        .await;
+    let lower = agent
+        .handle(&mut session, context_update("tx_999", 2))
+        .await;
+    let events = agent
+        .handle(&mut session, user_message("remove the co-buyer"))
+        .await;
+
+    assert!(is_stale_context(&equal), "equal sequence: {equal:?}");
+    assert!(is_stale_context(&lower), "lower sequence: {lower:?}");
+    let [ServerEvent::ActionProposal(proposal)] = &events[..] else {
+        panic!("expected one proposal, got {events:?}");
+    };
+    assert_eq!(
+        (
+            proposal.params["transactionId"].as_str(),
+            proposal.context_seq
+        ),
+        (Some("tx_582"), 3),
+        "the refused snapshots must not have replaced the applied one"
+    );
+}
+
+#[tokio::test]
+async fn the_first_context_update_after_init_must_carry_a_sequence_above_zero() {
+    let executions = Arc::new(Mutex::new(Vec::new()));
+    let agent = agent_with(ScriptedLlm::returning(tool_call()), Arc::clone(&executions));
+    let mut session = Session::new(User {
+        id: "alex",
+        can_remove_co_buyer: true,
+    });
+    open_session(&agent, &mut session).await;
+
+    let zero = agent
+        .handle(&mut session, context_update("tx_999", 0))
+        .await;
+    let one = agent
+        .handle(&mut session, context_update("tx_582", 1))
+        .await;
+
+    assert!(is_stale_context(&zero), "Init's snapshot is 0: {zero:?}");
+    assert!(one.is_empty(), "1 follows Init's 0: {one:?}");
+}
+
+#[tokio::test]
+async fn a_later_init_resets_the_context_sequence() {
+    let executions = Arc::new(Mutex::new(Vec::new()));
+    let agent = agent_with(ScriptedLlm::returning(tool_call()), Arc::clone(&executions));
+    let mut session = Session::new(User {
+        id: "alex",
+        can_remove_co_buyer: true,
+    });
+    open_session(&agent, &mut session).await;
+    let applied = agent
+        .handle(&mut session, context_update("tx_582", 5))
+        .await;
+    assert!(applied.is_empty(), "got {applied:?}");
+
+    open_session(&agent, &mut session).await;
+    let after_reinit = agent
+        .handle(&mut session, context_update("tx_583", 1))
+        .await;
+
+    assert!(
+        after_reinit.is_empty(),
+        "a second Init resets the sequence to 0: {after_reinit:?}"
+    );
+}
+
 #[tokio::test]
 async fn confirm_of_unknown_proposal_is_an_error() {
     let executions = Arc::new(Mutex::new(Vec::new()));

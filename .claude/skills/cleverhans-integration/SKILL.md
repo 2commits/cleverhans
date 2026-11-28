@@ -156,7 +156,9 @@ let app = Router::new()
 let app = Router::new().merge(agent_router("/agent", agent, Arc::new(HeaderAuth)));
 ```
 
-The framework never constructs a principal. `AgentConfig`: `app_instructions` (appended to the non-replaceable `DEFAULT_SYSTEM_PROMPT`), `max_validation_retries` (default 2), `describe_context` (default true). On assembly, `Agent` logs the registry it sees via `tracing` (`info`: one line per action + a summary) — enable a subscriber to catch a missing action or wrong block at startup. Non-axum transports: `cleverhans_ws_core::run_session(...)` directly, or `cleverhans-grpc`.
+The framework never constructs a principal. `AgentConfig`: `app_instructions` (appended to the non-replaceable `DEFAULT_SYSTEM_PROMPT`), `max_validation_retries` (default 2), `describe_context` (default true). On assembly, `Agent` logs the registry it sees via `tracing` (`info`: one line per action + a summary) — enable a subscriber to catch a missing action or wrong block at startup. Non-axum transports: `cleverhans_ws_core::run_session(...)` directly (it returns a `SessionExit`; on `Ended(end)` close the socket with `end.close_code()` (1008) and `end.close_reason()`), or `cleverhans-grpc`.
+
+WebSocket session rules the routers implement (spec §6, §13): they select the subprotocol `cleverhans.v0.1` (`SUBPROTOCOL`) whenever the client offers it — a token offered beside it reaches your extractor via `cleverhans_ws::offered_subprotocols(&headers)`; a message of an unknown `type` is ignored without an answer and is not the first message; after an `error` with `recoverable: false` (`init_required`, `unsupported_spec_version`) the session is over and the socket closes with code 1008, the error code as reason; a `context_update` whose `context_seq` does not grow is refused with `stale_context` (recoverable) and not applied. Node (`bindAgentSocket`, `session.closeCode`/`closeReason`) and Python (`session.close_code`/`close_reason`, `cleverhans_agent.SUBPROTOCOL`) hosts own their WebSocket server: select the subprotocol when offered and close with that code and reason.
 
 ### 6. Test offline, then eval
 
@@ -199,7 +201,7 @@ const session = new AgentSession(transport, {
 });
 ```
 
-Create once (`useMemo`); the app owns the lifetime. Keep context synced with navigation — the agent targets whatever the context says the user is standing on, and navigation expires pending proposals:
+Create once (`useMemo`); the app owns the lifetime. To carry a token, pass `createWebSocketTransport(url, { protocols: [token] })`: the transport offers `cleverhans.v0.1` first, then your values (without `protocols` it offers none). Keep context synced with navigation — the agent targets whatever the context says the user is standing on, and navigation expires pending proposals (`updateContext` numbers `context_seq` 1, 2, …; the server refuses one that does not grow with `stale_context`):
 
 ```tsx
 useEffect(() => {

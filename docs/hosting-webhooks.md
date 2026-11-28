@@ -182,7 +182,10 @@ const session = new AgentSession(
 ```
 
 Nothing else changes — `@cleverhans/react` and `@cleverhans/ui` speak the
-same envelope to the service that they speak to an in-process host.
+same envelope to the service that they speak to an in-process host. The
+service selects the subprotocol `cleverhans.v0.1` when the frontend offers it
+(it does whenever you pass `protocols`); to hand a token carried that way to
+`verify_session`, add `sec-websocket-protocol` to `[auth] forward_headers`.
 
 ## Telemetry (OTEL metrics)
 

@@ -79,15 +79,19 @@ def authenticate(websocket: WebSocket) -> dict:
 @app.websocket("/agent")
 async def agent_ws(websocket: WebSocket) -> None:
     principal = authenticate(websocket)
-    await websocket.accept()
+    # Select the binding's subprotocol when the client offers it (a client
+    # that offers one fails the handshake if the server selects none).
+    offered = websocket.scope.get("subprotocols", [])
+    proto = cleverhans_agent.SUBPROTOCOL if cleverhans_agent.SUBPROTOCOL in offered else None
+    await websocket.accept(subprotocol=proto)
     session = agent.session(principal)
     try:
         while True:
             frame = await websocket.receive_text()
             async for event in session.handle(frame):
                 await websocket.send_json(event)
-            if session.closed:  # init-first violation: close, don't zombie
-                await websocket.close()
+            if session.closed:  # a non-recoverable error ended the session
+                await websocket.close(code=session.close_code, reason=session.close_reason)
                 return
     except WebSocketDisconnect:
         pass

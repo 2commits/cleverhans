@@ -50,10 +50,23 @@ wss.on("connection", (ws, request) => {
 ```
 
 `bindAgentSocket` is the whole transport glue: it opens one session under the
-principal, pumps frames, and closes the socket on an init-first violation —
-mirroring the Rust WS binding. Anything socket-shaped works (`ws`, uWS,
-Express/Fastify WS plugins). For finer control use
-`agent.session(principal)` + `session.handle(frame, onEvent)` directly.
+principal, pumps frames, and — when a non-recoverable error ends the session
+(spec §6.3: `init_required`, `unsupported_spec_version`) — closes the socket
+with code `1008` and the error code as the reason, mirroring the Rust WS
+binding. Anything socket-shaped works (`ws`, uWS, Express/Fastify WS
+plugins). For finer control use `agent.session(principal)` +
+`session.handle(frame, onEvent)` directly; `handle` resolves `true` once the
+session is over, and `session.closeCode` / `session.closeReason` tell you how
+to close.
+
+Your server answers the WebSocket upgrade, so it also selects the
+subprotocol. `@cleverhans/react` offers `cleverhans.v0.1` (exported here as
+`SUBPROTOCOL`) first whenever the frontend passes `protocols`, for example
+a token. The `ws` library's `WebSocketServer` selects the first offered value
+by default, which is that name, so the code above works as is; with your own
+`handleProtocols`, return `SUBPROTOCOL` when `protocols.has(SUBPROTOCOL)`,
+and read the token from `request.headers["sec-websocket-protocol"]` in
+`authenticate`.
 
 Runnable reference: [`typescript/node-demo`](../typescript/node-demo)
 (`node src/server.ts`, plus a no-network scripted flow in `src/smoke.ts`).

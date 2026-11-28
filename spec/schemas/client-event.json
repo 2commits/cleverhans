@@ -44,7 +44,7 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 18446744073709551615,
-          "description": "Client-monotonic sequence number (unsigned 64-bit); proposals record the snapshot they were built against (SPEC.md §6.4)."
+          "description": "Client-monotonic sequence number (unsigned 64-bit); proposals record the snapshot they were built against (SPEC.md §6.4). Must be greater than the `context_seq` of the last snapshot the session applied (the `Init` snapshot is 0): otherwise the update is not applied and the agent answers `Error` `stale_context` (SPEC.md §6.2)."
         }
       }
     },

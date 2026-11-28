@@ -1,0 +1,18 @@
+{
+  "name": "unknown_server_type_ignored",
+  "description": "A server message whose type the client does not know is ignored entirely (spec §13): it changes no session state, not even the busy indicator, and the events that follow are handled as usual.",
+  "spec": ["13"],
+  "steps": [
+    { "client": { "send_message": "hi" } },
+    { "assert": { "busy": "thinking" } },
+    { "server": { "type": "typing_indicator", "level": 3 } },
+    { "assert": { "busy": "thinking",
+                  "transcript": [ { "role": "user", "text": "hi" } ],
+                  "proposals": [],
+                  "last_error": null } },
+    { "server": { "type": "chat_message", "msg_id": "msg-1", "text": "Hello", "done": true } },
+    { "assert": { "busy": "idle",
+                  "transcript": [ { "role": "user", "text": "hi" },
+                                  { "role": "assistant", "text": "Hello" } ] } }
+  ]
+}

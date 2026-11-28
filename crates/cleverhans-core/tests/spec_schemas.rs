@@ -1534,6 +1534,7 @@ mod vectors {
     fn every_scripted_server_event_validates() {
         let validator = validator(&schema("server-event.json"));
         let known_states = serde_variants::<ProposalState>(json!("?"));
+        let known_types = serde_variants::<ServerEvent>(json!({"type": "?"}));
         let mut count = 0;
 
         for (path, vector) in vector_files("spec/vectors/client") {
@@ -1543,6 +1544,19 @@ mod vectors {
                 };
                 let location = format!("{path} steps[{i}].server");
                 count += 1;
+                // A message type from a later envelope (spec §13): outside
+                // the schema and the Rust types on purpose, so the vector
+                // can show that a client ignores it.
+                if !event["type"]
+                    .as_str()
+                    .is_some_and(|kind| known_types.contains(kind))
+                {
+                    assert!(
+                        serde_json::from_value::<ServerEvent>(event.clone()).is_err(),
+                        "{location}: an unknown type must not deserialize"
+                    );
+                    continue;
+                }
                 assert_valid(&validator, event, &location);
                 // The Rust reference reads every scripted event except a
                 // state outside spec §7: `ProposalState` is a closed enum,

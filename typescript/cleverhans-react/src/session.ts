@@ -78,6 +78,18 @@ const KNOWN_STATES: ReadonlySet<string> = new Set([
   "failed",
 ]);
 
+/**
+ * The `ServerEvent` types this library knows. The envelope grows by new
+ * message types (spec §13), so an event of any other type is ignored
+ * entirely: it changes no state, not even `busy`.
+ */
+const KNOWN_SERVER_TYPES: ReadonlySet<string> = new Set([
+  "chat_message",
+  "action_proposal",
+  "proposal_state_changed",
+  "error",
+]);
+
 const EMPTY: SessionSnapshot = {
   transcript: [],
   proposals: [],
@@ -225,6 +237,9 @@ export class AgentSession {
   }
 
   #onServerEvent(event: ServerEvent): void {
+    if (!KNOWN_SERVER_TYPES.has(event.type)) {
+      return; // spec §13: a message type this client does not know is ignored
+    }
     // Any server event means the agent has started responding.
     this.#awaitingReply = false;
     switch (event.type) {

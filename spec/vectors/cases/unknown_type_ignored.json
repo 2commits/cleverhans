@@ -1,0 +1,23 @@
+{
+  "name": "unknown_type_ignored",
+  "description": "The envelope grows by new message types, so a JSON object whose type is a string the receiver does not know is ignored without an answer; the session continues and the following user message still yields a proposal.",
+  "spec": ["6", "13"],
+  "layer": "binding",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "bindings": { "grpc": "skip" },
+  "frames": [
+    { "json": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "raw": "{\"type\":\"frobnicate\",\"level\":3}" },
+    { "json": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } }
+  ],
+  "expect": [
+    { "type": "action_proposal", "action_id": "transaction.coBuyer.remove" }
+  ],
+  "executions": []
+}

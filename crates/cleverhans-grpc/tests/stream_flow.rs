@@ -256,3 +256,46 @@ async fn non_init_first_message_closes_stream_unrecoverably() {
         ("init_required", false)
     );
 }
+
+#[tokio::test]
+async fn unsupported_spec_version_ends_the_stream_and_later_messages_get_no_answer() {
+    let old_init = pb::ClientEvent {
+        event: Some(pb::client_event::Event::Init(pb::Init {
+            spec_version: "9.9".to_owned(),
+            ..match pb_init().event {
+                Some(pb::client_event::Event::Init(init)) => init,
+                _ => unreachable!("pb_init builds an Init"),
+            }
+        })),
+    };
+
+    let events = drive(vec![
+        old_init,
+        pb_init(),
+        pb_user_message("remove the co-buyer"),
+    ])
+    .await;
+
+    let [pb::server_event::Event::Error(error)] = &events[..] else {
+        panic!("expected a single error, got {events:?}");
+    };
+    assert_eq!(
+        (error.code.as_str(), error.recoverable),
+        ("unsupported_spec_version", false)
+    );
+}
+
+#[tokio::test]
+async fn an_empty_event_is_ignored_and_does_not_count_as_the_first_message() {
+    let events = drive(vec![
+        pb::ClientEvent { event: None },
+        pb_init(),
+        pb_user_message("remove the co-buyer"),
+    ])
+    .await;
+
+    assert!(
+        matches!(&events[..], [pb::server_event::Event::ActionProposal(_)]),
+        "got {events:?}"
+    );
+}

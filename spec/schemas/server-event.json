@@ -113,7 +113,7 @@
         "type": { "const": "error", "description": "Message discriminator." },
         "code": { "type": "string", "description": "Machine-readable code." },
         "message": { "type": "string", "description": "Human-readable message." },
-        "recoverable": { "type": "boolean", "description": "Whether the session can continue." }
+        "recoverable": { "type": "boolean", "description": "Whether the session can continue. After an error with `recoverable: false` the session is over: the agent processes no further client message and the binding closes the stream (SPEC.md §6.3)." }
       }
     },
     "DryRunPreview": {

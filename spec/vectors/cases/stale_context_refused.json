@@ -1,0 +1,50 @@
+{
+  "name": "stale_context_refused",
+  "description": "context_seq is client-monotonic: a context update whose context_seq is not greater than the last applied one (Init's snapshot is 0) is answered with a recoverable stale_context error and is not applied. The pending proposal still confirms against the applied snapshot, so it executes with the original record instead of expiring on the refused one.",
+  "spec": ["6.2", "6.3", "7.3"],
+  "layer": "agent",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "steps": [
+    { "send": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "expect": [
+      { "type": "action_proposal", "proposal_id": { "$bind": "P" }, "context_seq": 0 }
+    ] },
+    { "send": { "type": "context_update", "context_seq": 0,
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_999" } } },
+    { "expect": [
+      { "type": "error", "code": "stale_context", "recoverable": true }
+    ] },
+    { "send": { "type": "context_update", "context_seq": 4,
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "expect": [] },
+    { "send": { "type": "context_update", "context_seq": 4,
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_999" } } },
+    { "expect": [
+      { "type": "error", "code": "stale_context", "recoverable": true }
+    ] },
+    { "send": { "type": "context_update", "context_seq": 2,
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_999" } } },
+    { "expect": [
+      { "type": "error", "code": "stale_context", "recoverable": true }
+    ] },
+    { "send": { "type": "confirm_action", "proposal_id": { "$ref": "P" } } },
+    { "expect": [
+      { "type": "proposal_state_changed", "proposal_id": { "$ref": "P" }, "state": "executed" }
+    ] }
+  ],
+  "executions": [
+    { "action_id": "transaction.coBuyer.remove", "params": { "transactionId": "tx_581" } }
+  ]
+}

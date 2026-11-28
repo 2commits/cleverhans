@@ -86,8 +86,10 @@ fn context_from_pb(context: pb::Context) -> core::Context {
 ///
 /// # Errors
 ///
-/// [`ConvertError`] for an empty oneof or missing required fields; the
-/// binding reports these as recoverable stream errors, never crashes.
+/// [`ConvertError`] for an empty oneof or missing required fields. The
+/// binding ignores an empty oneof before converting (it is what a message
+/// type this proto does not know decodes to, spec §13) and reports missing
+/// fields as recoverable stream errors; it never crashes.
 pub fn client_event(event: pb::ClientEvent) -> Result<core::ClientEvent, ConvertError> {
     use pb::client_event::Event;
     match event.event.ok_or(ConvertError::EmptyEvent)? {

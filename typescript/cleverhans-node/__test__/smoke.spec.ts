@@ -2,7 +2,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import { Agent, type JsonObject, Rejected } from "../src/index";
+import {
+  Agent,
+  type AgentSocket,
+  type JsonObject,
+  Rejected,
+  SUBPROTOCOL,
+  bindAgentSocket,
+} from "../src/index";
 
 const REGISTRY: JsonObject = {
   spec_version: "0.1",
@@ -160,6 +167,37 @@ describe("napi bridge", () => {
     expect(later).toEqual([]);
   });
 
+  it("an unsupported spec version ends the session with a close code and reason", async () => {
+    const agent = makeAgent(async () => ({}));
+    const session = agent.session({ user_id: "a" });
+    expect([session.closed, session.closeCode, session.closeReason]).toEqual([false, null, null]);
+
+    const events = await session.handleCollect({ ...INIT, spec_version: "9.9" });
+    const later = await session.handleCollect(ASK);
+
+    expect(events).toEqual([expect.objectContaining({ code: "unsupported_spec_version", recoverable: false })]);
+    expect(later).toEqual([]);
+    expect([session.closed, session.closeCode, session.closeReason]).toEqual([
+      true,
+      1008,
+      "unsupported_spec_version",
+    ]);
+  });
+
+  it("an unknown message type is ignored and init is still required first", async () => {
+    const agent = makeAgent(async () => ({}));
+    const session = agent.session({ user_id: "a" });
+
+    const ignored = await session.handleCollect({ type: "frobnicate" });
+    const opened = await session.handleCollect(INIT);
+
+    expect([ignored, opened, session.closed]).toEqual([[], [], false]);
+  });
+
+  it("exports the binding's subprotocol name", () => {
+    expect(SUBPROTOCOL).toBe("cleverhans.v0.1");
+  });
+
   it("sync throws in handlers become internal failures, not crashes", async () => {
     const agent = makeAgent(() => {
       throw new Error("boom");
@@ -169,5 +207,64 @@ describe("napi bridge", () => {
 
     expect(events.at(-1)).toMatchObject({ state: "failed" });
     expect(String(events.at(-1)!.reason)).toContain("boom");
+  });
+});
+
+class FakeSocket implements AgentSocket {
+  sent: JsonObject[] = [];
+  closes: [number | undefined, string | undefined][] = [];
+
+  send(data: string): void {
+    this.sent.push(JSON.parse(data) as JsonObject);
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closes.push([code, reason]);
+  }
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200 && !condition(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe("bindAgentSocket", () => {
+  it("closes the socket with 1008 and init_required after an init-first violation", async () => {
+    const socket = new FakeSocket();
+    const onMessage = bindAgentSocket(makeAgent(async () => ({})), { user_id: "a" }, socket);
+
+    onMessage(JSON.stringify(ASK));
+    await until(() => socket.closes.length > 0);
+
+    expect(socket.sent).toEqual([expect.objectContaining({ code: "init_required", recoverable: false })]);
+    expect(socket.closes).toEqual([[1008, "init_required"]]);
+  });
+
+  it("closes the socket with 1008 and unsupported_spec_version, and answers nothing later", async () => {
+    const socket = new FakeSocket();
+    const onMessage = bindAgentSocket(makeAgent(async () => ({})), { user_id: "a" }, socket);
+
+    onMessage(JSON.stringify({ ...INIT, spec_version: "9.9" }));
+    onMessage(JSON.stringify(ASK));
+    await until(() => socket.closes.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(socket.sent).toEqual([
+      expect.objectContaining({ code: "unsupported_spec_version", recoverable: false }),
+    ]);
+    expect(socket.closes).toEqual([[1008, "unsupported_spec_version"]]);
+  });
+
+  it("leaves an open session's socket open", async () => {
+    const socket = new FakeSocket();
+    const onMessage = bindAgentSocket(makeAgent(async () => ({})), { user_id: "a" }, socket);
+
+    onMessage(JSON.stringify(INIT));
+    onMessage(JSON.stringify(ASK));
+    await until(() => socket.sent.length > 0);
+
+    expect(socket.sent.at(-1)).toMatchObject({ type: "action_proposal" });
+    expect(socket.closes).toEqual([]);
   });
 });

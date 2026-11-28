@@ -27,7 +27,8 @@ use cleverhans_core::seams::{
     LlmProvider,
 };
 use cleverhans_ffi::{
-    DeclarativeSlots, FfiPrincipal, FramePump, LlmSpec, assemble_registry, build_llm,
+    DeclarativeSlots, FfiPrincipal, FrameOutcome, FramePump, LlmSpec, SessionEnd,
+    assemble_registry, build_llm,
 };
 
 /// A host callback receiving `(payload_a, payload_b)` JSON values and
@@ -305,7 +306,7 @@ impl Agent {
         Session {
             agent: Arc::clone(&self.inner),
             pump: Arc::new(Mutex::new(FramePump::new(principal))),
-            closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            end: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
@@ -315,7 +316,18 @@ impl Agent {
 pub struct Session {
     agent: Arc<CoreAgent<FfiPrincipal>>,
     pump: Arc<Mutex<FramePump<FfiPrincipal>>>,
-    closed: Arc<std::sync::atomic::AtomicBool>,
+    /// Why the session ended, once it has; readable without awaiting the
+    /// pump lock.
+    end: Arc<std::sync::Mutex<Option<SessionEnd>>>,
+}
+
+impl Session {
+    fn end(&self) -> Option<SessionEnd> {
+        self.end
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 #[napi]
@@ -323,8 +335,10 @@ impl Session {
     /// Handles one inbound JSON frame; `onEvent` fires once per outbound
     /// JSON frame as it becomes available (chat deltas stream live). The
     /// returned promise resolves when the turn completes; it resolves `true`
-    /// when the session is closed (init-first violation, spec §6.1), after
-    /// which the host should close its transport.
+    /// when the session is over — the server sent an error with
+    /// `recoverable: false` (spec §6.3), for example `init_required` or
+    /// `unsupported_spec_version` — after which the host closes its
+    /// transport with `closeCode` and `closeReason`.
     #[napi]
     pub async fn handle(&self, frame: String, on_event: EmitFn) -> Result<bool> {
         let agent = Arc::clone(&self.agent);
@@ -336,16 +350,33 @@ impl Session {
                 true
             })
             .await;
-        if outcome == cleverhans_ffi::FrameOutcome::Closed {
-            self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let FrameOutcome::Closed(end) = outcome {
+            *self
+                .end
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(end);
         }
         Ok(pump.is_closed())
     }
 
-    /// Whether an init-first violation has closed the session. Once true,
-    /// further frames emit no events; close your transport.
+    /// Whether the session is over (a non-recoverable error, spec §6.3).
+    /// Once true, further frames emit no events; close your transport.
     #[napi(getter)]
     pub fn closed(&self) -> bool {
-        self.closed.load(std::sync::atomic::Ordering::SeqCst)
+        self.end().is_some()
+    }
+
+    /// The WebSocket close code to close the transport with once the
+    /// session is over (`1008`, policy violation); `null` while it is open.
+    #[napi(getter)]
+    pub fn close_code(&self) -> Option<u32> {
+        self.end().map(|end| u32::from(end.close_code()))
+    }
+
+    /// The WebSocket close reason once the session is over: the `code` of
+    /// the error that ended it; `null` while it is open.
+    #[napi(getter)]
+    pub fn close_reason(&self) -> Option<String> {
+        self.end().map(|end| end.close_reason().to_owned())
     }
 }

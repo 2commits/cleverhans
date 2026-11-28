@@ -66,9 +66,21 @@ app = FastAPI()
 
 def authenticate(websocket: WebSocket) -> dict:
     """Your real app maps its session cookie / bearer token here (spec §10)
-    and rejects the connection when unauthenticated. The returned blob is
-    the principal every handler and authz check runs under."""
+    and rejects the connection when unauthenticated. A browser cannot set
+    headers on a WebSocket, so a token often rides as an extra subprotocol:
+    the values in `websocket.scope["subprotocols"]` other than
+    `cleverhans_agent.SUBPROTOCOL`. The returned blob is the principal every
+    handler and authz check runs under."""
     return {"user_id": "demo", "roles": ["editor"]}
+
+
+def subprotocol(websocket: WebSocket) -> str | None:
+    """The binding's subprotocol when the client offers it, else none. A
+    client that offers subprotocols fails the handshake unless the server
+    selects one; `@cleverhans/react` offers `cleverhans.v0.1` first whenever
+    it is given `protocols`."""
+    offered = websocket.scope.get("subprotocols", [])
+    return cleverhans_agent.SUBPROTOCOL if cleverhans_agent.SUBPROTOCOL in offered else None
 
 
 @app.get("/")
@@ -79,17 +91,18 @@ def index():
 @app.websocket("/agent")
 async def agent_ws(websocket: WebSocket) -> None:
     principal = authenticate(websocket)
-    await websocket.accept()
+    await websocket.accept(subprotocol=subprotocol(websocket))
     session = agent.session(principal)
     try:
         while True:
             frame = await websocket.receive_text()
             async for event in session.handle(frame):
                 await websocket.send_json(event)
-            # Init-first violation (spec §6.1): mirror the Rust WS binding
-            # and close instead of leaving a zombie stream.
+            # A non-recoverable error (init_required, unsupported_spec_version)
+            # ended the session (spec §6.3): close the way the Rust WS binding
+            # does, with 1008 and the error code as the reason.
             if session.closed:
-                await websocket.close()
+                await websocket.close(code=session.close_code, reason=session.close_reason)
                 return
     except WebSocketDisconnect:
         pass

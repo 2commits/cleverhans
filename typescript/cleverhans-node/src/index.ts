@@ -21,6 +21,20 @@ import {
   generateTypes as nativeGenerateTypes,
 } from "../index.js";
 
+/**
+ * The WebSocket subprotocol name of the binding (the wire version). Your
+ * WebSocket server selects it when the client offers it: `@cleverhans/react`
+ * offers it first whenever it is given `protocols` (for example to carry a
+ * token), and a browser fails the handshake when it offers subprotocols and
+ * the server selects none. The `ws` library's `WebSocketServer` selects the
+ * first offered value by default, which is this name; with your own
+ * `handleProtocols`, return it when `protocols.has(SUBPROTOCOL)`.
+ */
+export const SUBPROTOCOL = "cleverhans.v0.1";
+
+/** WebSocket close code for a session the server ended: 1008, policy violation. */
+export const CLOSE_POLICY_VIOLATION = 1008;
+
 /** JSON-compatible value. */
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -127,17 +141,32 @@ export class Session {
   }
 
   /**
-   * True after an init-first violation closed the session (spec §6.1).
-   * Further frames emit no events; close your transport.
+   * True once the session is over: the server sent an `error` with
+   * `recoverable: false` (spec §6.3), such as `init_required` or
+   * `unsupported_spec_version`. Further frames emit no events; close your
+   * transport with {@link closeCode} and {@link closeReason}.
    */
   get closed(): boolean {
     return this.#native.closed;
   }
 
+  /** The WebSocket close code once the session is over (1008); `null` while open. */
+  get closeCode(): number | null {
+    return this.#native.closeCode ?? null;
+  }
+
+  /**
+   * The WebSocket close reason once the session is over: the `code` of the
+   * error that ended it; `null` while open.
+   */
+  get closeReason(): string | null {
+    return this.#native.closeReason ?? null;
+  }
+
   /**
    * Handles one client event (JSON string or object); `onEvent` fires per
    * server event as it becomes available. Resolves when the turn
-   * completes, with `true` when the session is closed (spec §6.1) — close
+   * completes, with `true` when the session is over (spec §6.3) — close
    * your transport then.
    */
   handle(frame: string | JsonObject, onEvent: (event: ServerEvent) => void): Promise<boolean> {
@@ -208,16 +237,18 @@ export class Agent {
  */
 export interface AgentSocket {
   send(data: string): void;
-  close(): void;
+  close(code?: number, reason?: string): void;
 }
 
 /**
  * Bridges one authenticated socket to one agent session: returns the message
- * listener that pumps frames through the session and mirrors the Rust WS
- * binding's close-on-init-violation. The only glue left in your app is
- * wiring it to your server's connection event:
+ * listener that pumps frames through the session. When the session ends
+ * after a non-recoverable error (spec §6.3) it closes the socket the way the
+ * Rust WS binding does: code 1008 with the error's `code` as the reason. The
+ * only glue left in your app is wiring it to your server's connection event:
  *
  * ```ts
+ * const wss = new WebSocketServer({ port: 8788, path: "/agent" }); // selects SUBPROTOCOL when offered first
  * wss.on("connection", (ws, request) => {
  *   const principal = authenticate(request); // your auth, before any frame
  *   ws.on("message", bindAgentSocket(agent, principal, ws));
@@ -230,14 +261,19 @@ export function bindAgentSocket(
   socket: AgentSocket,
 ): (data: unknown) => void {
   const session = agent.session(principal);
+  let closing = false;
   return (data) => {
     void session
       .handle(String(data), (event) => socket.send(JSON.stringify(event)))
       .then((closed) => {
-        // Init-first violation (spec §6.1): close instead of leaving a
-        // zombie stream.
-        if (closed) {
-          socket.close();
+        // A non-recoverable error ended the session (spec §6.3): close
+        // with 1008 and the error code instead of leaving a zombie stream.
+        if (closed && !closing) {
+          closing = true;
+          socket.close(
+            session.closeCode ?? CLOSE_POLICY_VIOLATION,
+            session.closeReason ?? undefined,
+          );
         }
       });
   };

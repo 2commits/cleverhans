@@ -6,12 +6,29 @@
 //! Same transport rules as the gRPC binding: the stream is authenticated
 //! before any envelope traffic (principal from HTTP headers at upgrade), and
 //! the first client message must be `init` (spec §6.1).
+//!
+//! WebSocket specifics handled here:
+//!
+//! - **Subprotocol.** The adapter selects [`SUBPROTOCOL`]
+//!   (`cleverhans.v0.1`) whenever the client offers it, so a browser that
+//!   offers it — `@cleverhans/react` does whenever its caller passes
+//!   `protocols`, for example to carry a token — completes the handshake.
+//!   Every other offered value stays in the upgrade request's
+//!   `Sec-WebSocket-Protocol` header for the principal extractor to read
+//!   ([`offered_subprotocols`]). A client that offers none gets none.
+//! - **Close frame.** When the session ends after a non-recoverable error
+//!   (spec §6.3) the adapter sends a close frame with code `1008` (policy
+//!   violation) and the error's `code` as the reason, then waits briefly
+//!   for the client's answer. When the client closes first, the WebSocket
+//!   library answers its close frame.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Extension, State};
+use axum::http::header::SEC_WEBSOCKET_PROTOCOL;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -20,7 +37,36 @@ use tokio::sync::mpsc;
 
 use cleverhans_core::agent::Agent;
 use cleverhans_core::async_trait;
-pub use cleverhans_ws_core::{run_session, to_json};
+pub use cleverhans_ws_core::{
+    CLOSE_POLICY_VIOLATION, SUBPROTOCOL, SessionEnd, SessionExit, run_session, to_json,
+};
+
+/// How long the adapter waits for the client's close frame after it sent
+/// its own, before it drops the connection.
+const CLOSE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The subprotocols the client offered in the upgrade request, in order,
+/// without [`SUBPROTOCOL`] — the values a host may use to carry a
+/// credential (a browser cannot set other headers on a WebSocket). Read it
+/// from a [`PrincipalExtractor`]:
+///
+/// ```
+/// # use axum::http::HeaderMap;
+/// let mut headers = HeaderMap::new();
+/// headers.insert("sec-websocket-protocol", "cleverhans.v0.1, token-abc".parse().unwrap());
+/// let token = cleverhans_ws::offered_subprotocols(&headers).next();
+/// assert_eq!(token.as_deref(), Some("token-abc"));
+/// ```
+pub fn offered_subprotocols(headers: &HeaderMap) -> impl Iterator<Item = String> + '_ {
+    headers
+        .get_all(SEC_WEBSOCKET_PROTOCOL)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != SUBPROTOCOL)
+        .map(str::to_owned)
+}
 
 /// Authenticates an upgrade request: maps HTTP headers (cookie, bearer
 /// token, …) onto the app's principal. The framework never constructs a
@@ -108,6 +154,7 @@ async fn extension_upgrade_handler<P: Clone + Send + Sync + 'static>(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     upgrade
+        .protocols([SUBPROTOCOL])
         .on_upgrade(move |socket| serve_socket(socket, agent, principal))
         .into_response()
 }
@@ -122,6 +169,7 @@ async fn upgrade_handler<P: Send + Sync + 'static>(
         Err(status) => return status.into_response(),
     };
     upgrade
+        .protocols([SUBPROTOCOL])
         .on_upgrade(move |socket| serve_socket(socket, Arc::clone(&state.agent), principal))
         .into_response()
 }
@@ -150,29 +198,60 @@ async fn async_upgrade_handler<P: Send + Sync + 'static>(
         Err(status) => return status.into_response(),
     };
     upgrade
+        .protocols([SUBPROTOCOL])
         .on_upgrade(move |socket| serve_socket(socket, Arc::clone(&state.agent), principal))
         .into_response()
 }
 
 async fn serve_socket<P: Send + Sync>(socket: WebSocket, agent: Arc<Agent<P>>, principal: P) {
     use futures_util::SinkExt;
+    use futures_util::future::ready;
 
     let (mut sink, stream) = socket.split();
-    // Non-text frames (binary, ping/pong, close) carry no envelope traffic.
-    let inbound = stream.filter_map(|frame| async {
-        match frame {
-            Ok(Message::Text(text)) => Some(text.to_string()),
-            _ => None,
-        }
-    });
+    // A read error ends the inbound stream; non-text frames (binary,
+    // ping/pong, close) carry no envelope traffic. Reading on after a close
+    // frame lets the WebSocket library send its answer.
+    let inbound = stream
+        .take_while(|frame| ready(frame.is_ok()))
+        .filter_map(|frame| async {
+            match frame {
+                Ok(Message::Text(text)) => Some(text.to_string()),
+                _ => None,
+            }
+        });
     tokio::pin!(inbound);
-    let (tx, mut rx) = mpsc::channel::<String>(32);
+    let (tx, rx) = mpsc::channel::<String>(32);
     let writer = async {
+        // Owns the receiver, so a failed write drops it and the session
+        // sees the receiver gone instead of blocking on a full channel.
+        let mut rx = rx;
         while let Some(json) = rx.recv().await {
             if sink.send(Message::Text(json.into())).await.is_err() {
-                break;
+                return false;
             }
         }
+        true
     };
-    tokio::join!(run_session(agent, principal, inbound, tx), writer);
+    let (exit, writable) =
+        tokio::join!(run_session(agent, principal, inbound.as_mut(), tx), writer);
+    let SessionExit::Ended(end) = exit else {
+        return;
+    };
+    if !writable {
+        return;
+    }
+    // Spec §6.3: the session is over. Every event is written (the writer
+    // drained the channel); close with 1008 and the error code, then read
+    // until the client answers so the close handshake completes.
+    let close = Message::Close(Some(CloseFrame {
+        code: end.close_code(),
+        reason: end.close_reason().into(),
+    }));
+    if sink.send(close).await.is_err() {
+        return;
+    }
+    let _ = tokio::time::timeout(CLOSE_HANDSHAKE_TIMEOUT, async {
+        while inbound.next().await.is_some() {}
+    })
+    .await;
 }

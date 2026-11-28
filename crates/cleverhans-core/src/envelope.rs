@@ -45,7 +45,9 @@ pub enum ClientEvent {
         /// The new snapshot.
         context: Context,
         /// Client-monotonic sequence number; proposals record the snapshot
-        /// they were built against.
+        /// they were built against. Must be greater than the last one the
+        /// session applied (`Init`'s snapshot is 0), or the update is not
+        /// applied and the agent answers `Error` `stale_context`.
         context_seq: u64,
     },
     /// A user chat turn.
@@ -72,6 +74,17 @@ pub enum ClientEvent {
 }
 
 impl ClientEvent {
+    /// Every wire tag this version of the envelope knows, one per variant.
+    /// A receiver ignores a message whose `type` is not among them
+    /// (spec §13).
+    pub const KINDS: [&'static str; 5] = [
+        "init",
+        "context_update",
+        "user_message",
+        "confirm_action",
+        "reject_action",
+    ];
+
     /// The wire tag of this event, for logging and metrics.
     #[must_use]
     pub fn kind(&self) -> &'static str {
@@ -159,7 +172,9 @@ pub enum ServerEvent {
         code: String,
         /// Human-readable message.
         message: String,
-        /// Whether the session can continue.
+        /// Whether the session can continue. After an error with
+        /// `recoverable: false` the session is over: the binding processes
+        /// no further client message and closes the stream.
         recoverable: bool,
     },
 }
@@ -215,6 +230,41 @@ mod tests {
             let back: ServerEvent = serde_json::from_str(&json).expect("deserialize");
 
             assert_eq!(back, event);
+        }
+
+        #[test]
+        fn kinds_name_every_client_event_variant() {
+            let context = Context::default();
+            let tags: Vec<String> = [
+                ClientEvent::Init {
+                    spec_version: "0.1".to_owned(),
+                    context: context.clone(),
+                },
+                ClientEvent::ContextUpdate {
+                    context,
+                    context_seq: 1,
+                },
+                ClientEvent::UserMessage {
+                    text: String::new(),
+                    client_msg_id: String::new(),
+                },
+                ClientEvent::ConfirmAction {
+                    proposal_id: String::new(),
+                },
+                ClientEvent::RejectAction {
+                    proposal_id: String::new(),
+                    reason: None,
+                },
+            ]
+            .iter()
+            .map(|event| {
+                let tag = serde_json::to_value(event).expect("serialize")["type"].clone();
+                assert_eq!(tag, event.kind(), "kind() is the serde tag");
+                event.kind().to_owned()
+            })
+            .collect();
+
+            assert_eq!(tags, ClientEvent::KINDS);
         }
     }
 }

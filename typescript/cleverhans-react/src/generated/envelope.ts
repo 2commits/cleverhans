@@ -74,7 +74,7 @@ export interface ContextUpdate {
    */
   context: Context;
   /**
-   * Client-monotonic sequence number (unsigned 64-bit); proposals record the snapshot they were built against (SPEC.md §6.4).
+   * Client-monotonic sequence number (unsigned 64-bit); proposals record the snapshot they were built against (SPEC.md §6.4). Must be greater than the `context_seq` of the last snapshot the session applied (the `Init` snapshot is 0): otherwise the update is not applied and the agent answers `Error` `stale_context` (SPEC.md §6.2).
    */
   context_seq: number;
 }
@@ -262,7 +262,7 @@ export interface ErrorMessage {
    */
   message: string;
   /**
-   * Whether the session can continue.
+   * Whether the session can continue. After an error with `recoverable: false` the session is over: the agent processes no further client message and the binding closes the stream (SPEC.md §6.3).
    */
   recoverable: boolean;
 }
