@@ -3,7 +3,8 @@
 JSON Schemas (draft 2020-12) for the JSON forms of the CleverHans protocol.
 The prose specification, [`spec/SPEC.md`](../SPEC.md), stays normative; these
 files are its machine-readable form, and the Rust reference types are checked
-against them. Change a schema and its Rust type together.
+against them. Change a schema and its Rust type together, then regenerate
+the TypeScript envelope types (see below).
 
 | File | Describes | Status |
 |---|---|---|
@@ -29,6 +30,26 @@ envelope schemas never set `additionalProperties: false`: a receiver ignores
 fields it does not know. `ProposalStateChanged.state` is a plain string, not
 an enum, on purpose (SPEC.md §11): a frontend treats an unrecognized state as
 terminal.
+
+### Generated TypeScript types
+
+The envelope types of `@cleverhans/react` are generated from
+`client-event.json` and `server-event.json` into
+[`typescript/cleverhans-react/src/generated/envelope.ts`](../../typescript/cleverhans-react/src/generated/envelope.ts),
+which is committed. Nobody edits it by hand; regenerate it from `typescript/`:
+
+```sh
+pnpm codegen         # rewrite the file (and the registry codegen output)
+pnpm codegen:check   # fail when it is stale; CI's web job runs this
+```
+
+The script is
+[`typescript/scripts/codegen-envelope.mjs`](../../typescript/scripts/codegen-envelope.mjs)
+(json-schema-to-typescript). The generated interfaces are closed: a schema's
+openness to unknown fields is a wire rule for receivers, and an index
+signature in TypeScript would hide typos. The `Error` message is exported as
+`ErrorMessage`, so it does not shadow the global `Error`, and the package
+names the `Context` snapshot `AppContext`.
 
 ## The registry schema
 

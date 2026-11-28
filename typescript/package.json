@@ -6,7 +6,10 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "codegen": "cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py",
-    "codegen:check": "cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py --check"
+    "codegen": "node scripts/codegen-envelope.mjs && cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py",
+    "codegen:check": "node scripts/codegen-envelope.mjs --check && cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py --check"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "16.0.0"
   }
 }

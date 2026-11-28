@@ -1,4 +1,9 @@
-import type { AgentTransport, ClientEvent, ServerEvent } from "../src/envelope";
+import type {
+  ActionProposal,
+  AgentTransport,
+  ClientEvent,
+  ServerEvent,
+} from "../src/envelope";
 
 /** In-memory transport: records what the client sends, replays server events. */
 export class FakeTransport implements AgentTransport {
@@ -21,7 +26,7 @@ export class FakeTransport implements AgentTransport {
   }
 }
 
-export function proposalEvent(id: string, blockType = "confirm"): ServerEvent {
+export function proposalEvent(id: string, blockType = "confirm"): ActionProposal {
   return {
     type: "action_proposal",
     proposal_id: id,

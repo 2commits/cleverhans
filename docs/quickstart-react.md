@@ -53,6 +53,11 @@ const components: BlockComponents<BlockSlotsMap> = { confirm: MyConfirmCard };
 </AgentProvider>;
 ```
 
+The envelope types (`ActionProposal`, `DryRunPreview`, `ServerEvent`, …) are
+generated from the JSON Schemas in [`spec/schemas/`](../spec/schemas/README.md).
+A proposal carries `type: "action_proposal"`, and every `DryRunPreview` field
+is optional: render an absent `affected_count` as 0.
+
 `useAgentSession()` gives `{ snapshot, sendMessage, updateContext, confirm,
 reject }`; `confirm(id)` / `reject(id, reason?)` are the only proposal writes
 a frontend can perform. Executed results arrive as proposal state changes —
