@@ -172,6 +172,35 @@ Run it with `cargo test -p cleverhans-core --test spec_schema_growth`.
 
 ## Other formal definitions
 
+- **WebSocket + JSON binding (SPEC.md §11):** the AsyncAPI 3.1 document
+  [`spec/asyncapi.yaml`](../asyncapi.yaml) describes the binding as the
+  reference implementation runs it (`cleverhans-ws-core`, `cleverhans-ws`,
+  `@cleverhans/react`'s `createWebSocketTransport`): one channel, the five
+  `ClientEvent` messages the frontend sends, the four `ServerEvent` messages
+  it receives, how a session starts and ends, and the `Error` codes the
+  implementation sends. It does not copy the envelope: each payload is a
+  reference to its entry in the two schemas above, declared as
+  `application/schema+json;version=2020-12`. Check it from `typescript/`:
+
+  ```sh
+  pnpm spec:check   # CI's web job runs this
+  ```
+
+  [`typescript/scripts/check-asyncapi.mjs`](../../typescript/scripts/check-asyncapi.mjs)
+  validates the document with the official parser (`@asyncapi/parser`);
+  fails when the messages of the send and receive operations differ from
+  the `oneOf` alternatives of `ClientEvent` and `ServerEvent`, or a payload
+  points anywhere but its own `$defs` entry; and validates every example
+  against its schema entry with a draft 2020-12 validator, because the
+  parser checks neither AsyncAPI 3 examples nor payloads in this format.
+
+  To read it rendered, open it in an AsyncAPI viewer such as
+  [AsyncAPI Studio](https://studio.asyncapi.com) from a place where the
+  relative `./schemas/` references resolve; pasted into Studio's editor on
+  its own, the payloads stay unresolved. The AsyncAPI CLI (not a dependency
+  of this repository) documents a local read-only preview that bundles the
+  references, `asyncapi start preview spec/asyncapi.yaml`; this repository
+  does not run or test that command. There is no hosted reference site.
 - **Host webhook contract (SPEC.md §14):** request and response bodies in
   [`spec/webhook/schemas/`](../webhook/schemas/), kept in step with the Rust
   wire types by `crates/cleverhans-webhook/tests/wire_schema_sync.rs`.

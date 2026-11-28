@@ -66,6 +66,8 @@ jobs:
       - run: pnpm -r test
       - name: Generated types are fresh
         run: pnpm codegen:check
+      - name: AsyncAPI document is valid and matches the schemas
+        run: pnpm spec:check
 
   python:
     runs-on: ubuntu-latest

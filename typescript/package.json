@@ -7,9 +7,13 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "codegen": "node scripts/codegen-envelope.mjs && cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py",
-    "codegen:check": "node scripts/codegen-envelope.mjs --check && cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py --check"
+    "codegen:check": "node scripts/codegen-envelope.mjs --check && cargo run -p cleverhans-codegen -- --schema ../crates/cleverhans-demo/registry.json --ts playground/src/generated/registry.ts --py ../python/generated/registry.py --check",
+    "spec:check": "node scripts/check-asyncapi.mjs"
   },
   "devDependencies": {
+    "@asyncapi/parser": "3.6.6",
+    "ajv": "8.20.0",
+    "js-yaml": "4.3.2",
     "json-schema-to-typescript": "16.0.0"
   }
 }
