@@ -175,6 +175,9 @@ fn registry(executions: Arc<Mutex<Vec<(String, JsonMap)>>>) -> Registry<User> {
 }
 
 fn agent_with(llm: ScriptedLlm, executions: Arc<Mutex<Vec<(String, JsonMap)>>>) -> Agent<User> {
+    // Every agent in this binary is built here, so the telemetry collector
+    // is in place before any test can emit (see `telemetry::install`).
+    telemetry::install();
     Agent::new(
         Arc::new(registry(executions)),
         Arc::new(llm),
@@ -518,7 +521,8 @@ mod mandate {
 }
 
 mod telemetry {
-    use std::sync::{Arc, Mutex};
+    use std::cell::RefCell;
+    use std::sync::{Arc, Mutex, Once};
 
     use tracing::field::{Field, Visit};
 
@@ -533,7 +537,49 @@ mod telemetry {
         seen: Mutex<Vec<(String, String)>>,
     }
 
-    struct Collector(Arc<Events>);
+    thread_local! {
+        /// The sink of the test running on this thread, while it records.
+        static SINK: RefCell<Option<Arc<Events>>> = const { RefCell::new(None) };
+    }
+
+    /// This thread's sink, if any. `try_with`: a thread being torn down may
+    /// still emit, and must not panic here.
+    fn sink() -> Option<Arc<Events>> {
+        SINK.try_with(|sink| sink.borrow().clone()).ok().flatten()
+    }
+
+    /// One collector for the whole test binary; each event goes to the sink
+    /// of the test on the emitting thread, so tests stay parallel and
+    /// independent.
+    ///
+    /// Not a per-test `set_default`: `tracing` caches a callsite's interest
+    /// process-wide when the callsite is first hit, and while at most one
+    /// dispatcher is registered, `tracing-core` asks only the default
+    /// subscriber of the thread that hits it. A test without a subscriber
+    /// hitting `proposal_state` first cached `never`, and the telemetry
+    /// test's own collector then saw no event. As the global default,
+    /// installed before any agent exists, this collector is every thread's
+    /// view of every callsite, and it never answers `never`.
+    struct Collector;
+
+    /// Installs [`Collector`] as the global default, once per process.
+    pub(super) fn install() {
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| {
+            tracing::subscriber::set_global_default(Collector)
+                .expect("no other global subscriber in this test binary");
+        });
+    }
+
+    /// Routes this thread's telemetry to a sink until dropped.
+    struct Recording;
+
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            // Ignore a thread already tearing down: its sink goes with it.
+            let _ = SINK.try_with(|sink| sink.borrow_mut().take());
+        }
+    }
 
     #[derive(Default)]
     struct Captured {
@@ -557,13 +603,13 @@ mod telemetry {
 
     impl tracing::Subscriber for Collector {
         fn register_callsite(&self, _: &tracing::Metadata<'_>) -> tracing::subscriber::Interest {
-            // Never cache: the process runs other subscribers in parallel
-            // tests, and a cached `never` would silence them too.
+            // Decided per event in `enabled`: whether the emitting thread
+            // records changes from test to test.
             tracing::subscriber::Interest::sometimes()
         }
 
         fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            metadata.target() == "cleverhans::telemetry::proposal"
+            metadata.target() == "cleverhans::telemetry::proposal" && sink().is_some()
         }
 
         fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
@@ -575,9 +621,10 @@ mod telemetry {
         fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
 
         fn event(&self, event: &tracing::Event<'_>) {
+            let Some(events) = sink() else { return };
             let mut captured = Captured::default();
             event.record(&mut captured);
-            self.0
+            events
                 .seen
                 .lock()
                 .expect("lock")
@@ -589,13 +636,17 @@ mod telemetry {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
-    fn collecting() -> (Arc<Events>, tracing::subscriber::DefaultGuard) {
+    /// Records this thread's proposal telemetry until the guard drops. The
+    /// session runs on this thread: `#[tokio::test]` is a current-thread
+    /// runtime.
+    fn collecting() -> (Arc<Events>, Recording) {
+        install();
         let events = Arc::new(Events::default());
-        let guard = tracing::subscriber::set_default(Collector(Arc::clone(&events)));
-        (events, guard)
+        SINK.with(|sink| *sink.borrow_mut() = Some(Arc::clone(&events)));
+        (events, Recording)
     }
 
-    async fn rejected_session() -> (Arc<Events>, tracing::subscriber::DefaultGuard) {
+    async fn rejected_session() -> (Arc<Events>, Recording) {
         let (events, guard) = collecting();
         let executions = Arc::new(Mutex::new(Vec::new()));
         let agent: Agent<User> =
