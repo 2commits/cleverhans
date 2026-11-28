@@ -26,8 +26,17 @@ new WebSocketServer({ port: 8788, path: "/agent" }).on("connection", (ws, reques
 ```
 
 - `bindAgentSocket(agent, principal, socket)` — the whole WS glue for any
-  socket-shaped object (`ws`, uWS, Express/Fastify WS plugins).
-- `session.handle(frame, onEvent)` — the lower-level per-frame pump.
+  socket-shaped object (`ws`, uWS, Express/Fastify WS plugins). When a
+  non-recoverable error ends the session (`init_required`,
+  `unsupported_spec_version`) it closes the socket with code 1008 and the
+  error code as the reason.
+- Subprotocol: your server selects `SUBPROTOCOL` (`"cleverhans.v0.1"`) when
+  the client offers it; `@cleverhans/react` offers it first whenever it is
+  given `protocols`. `ws`'s `WebSocketServer` does this by default (it picks
+  the first offered value).
+- `session.handle(frame, onEvent)` — the lower-level per-frame pump; it
+  resolves `true` once the session is over, and `session.closeCode` /
+  `session.closeReason` say how to close.
 - Throw `Rejected` from a handler to decline as a business rule.
 - `generateTypes(registry, target)` / `npx cleverhans-codegen` — registry →
   typed TS/Python/Rust modules, no Rust toolchain.

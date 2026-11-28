@@ -190,6 +190,51 @@ def test_session_closed_after_init_first_violation():
     assert later == []
 
 
+def test_close_code_and_reason_name_the_error_that_ended_the_session():
+    async def handler(params, principal):
+        return {}
+
+    async def main():
+        agent = make_agent(handler)
+        session = agent.session({"user_id": "a"})
+        before = (session.closed, session.close_code, session.close_reason)
+        events = await session.handle_collect({**INIT, "spec_version": "9.9"})
+        later = await session.handle_collect(ASK)  # post-close: nothing
+        after = (session.closed, session.close_code, session.close_reason)
+        return before, events, later, after
+
+    before, events, later, after = asyncio.run(main())
+
+    assert before == (False, None, None)
+    assert [(e["code"], e["recoverable"]) for e in events] == [
+        ("unsupported_spec_version", False)
+    ]
+    assert later == []
+    assert after == (True, 1008, "unsupported_spec_version")
+
+
+def test_an_unknown_message_type_is_ignored_and_init_is_still_required_first():
+    async def handler(params, principal):
+        return {}
+
+    async def main():
+        agent = make_agent(handler)
+        session = agent.session({"user_id": "a"})
+        ignored = await session.handle_collect({"type": "frobnicate"})
+        opened = await session.handle_collect(INIT)
+        return ignored, opened, session.closed
+
+    ignored, opened, closed = asyncio.run(main())
+
+    assert ignored == []
+    assert opened == []
+    assert not closed
+
+
+def test_the_subprotocol_name_is_exported():
+    assert cleverhans_agent.SUBPROTOCOL == "cleverhans.v0.1"
+
+
 def test_concurrent_sessions_do_not_interfere():
     async def handler(params, principal):
         await asyncio.sleep(0.01)

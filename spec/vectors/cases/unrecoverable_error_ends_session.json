@@ -1,0 +1,26 @@
+{
+  "name": "unrecoverable_error_ends_session",
+  "description": "An Error with recoverable: false ends the session: after unsupported_spec_version no further message is processed, so a later valid Init, user message and confirm get no answer and nothing executes.",
+  "spec": ["6.1", "6.3", "13"],
+  "layer": "binding",
+  "fixture": "co-buyer",
+  "llm": [
+    [ { "tool_call": { "name": "transaction.coBuyer.remove", "arguments": {} } } ]
+  ],
+  "authz": { "default": "allow" },
+  "frames": [
+    { "json": { "type": "init", "spec_version": "9.9",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "json": { "type": "init", "spec_version": "0.1.0-draft",
+                "context": { "route": "/transactions/tx_581",
+                             "selected_record_id": "tx_581" } } },
+    { "json": { "type": "user_message", "text": "remove the co-buyer", "client_msg_id": "c-1" } },
+    { "json": { "type": "confirm_action", "proposal_id": "prop-1" } }
+  ],
+  "expect": [
+    { "type": "error", "code": "unsupported_spec_version", "recoverable": false }
+  ],
+  "expect_close": true,
+  "executions": []
+}

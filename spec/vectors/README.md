@@ -76,10 +76,15 @@ per-event handler. `steps` alternate:
   `send`, after normalization.
 
 **Binding layer** drives raw text frames through the JSON-frame session
-loop (init-first ordering, malformed-frame handling — spec §6.1, §11).
-`frames` entries are `{"json": <object>}` (runner serializes) or
-`{"raw": "<verbatim>"}`. `expect` matches the flat outbound event list;
-`expect_close: true` asserts the session ends with no further events.
+loop (init-first ordering, malformed-frame handling, unknown message types,
+the end of a session after a non-recoverable error — spec §6.1, §6.3, §11,
+§13). `frames` entries are `{"json": <object>}` (runner serializes) or
+`{"raw": "<verbatim>"}`; a message the schemas do not describe, such as one
+of an unknown type, goes in `raw`. `expect` matches the flat outbound event
+list; `expect_close: true` asserts the session has ended by the last frame,
+and `false` (the default) that it has not. Runners feed every frame, also
+those after the session ended: an ended session answers none of them, which
+the exact `expect` list checks.
 
 ## Webhook-service vectors (`webhook/service/`)
 

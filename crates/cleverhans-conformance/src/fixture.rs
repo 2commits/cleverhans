@@ -201,7 +201,9 @@ pub struct Vector {
     /// Binding-layer expected events (flat, after normalization).
     #[serde(default)]
     pub expect: Vec<Value>,
-    /// Binding layer: no events may follow the matched list.
+    /// Binding layer: the session has ended by the last frame (a
+    /// non-recoverable error, spec §6.3); `false` asserts it has not. Frames
+    /// after the end are still fed and must produce no events.
     #[serde(default)]
     pub expect_close: bool,
     /// Exact ordered handler-invocation log; `[]` asserts nothing executed.

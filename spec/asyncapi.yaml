@@ -38,14 +38,32 @@ info:
     envelope traffic flows on an unauthenticated stream. The envelope itself
     never carries credentials.
 
+    ## Subprotocol
+
+    The binding has one subprotocol name, `cleverhans.v0.1` (the wire
+    version). The server selects it whenever the client offers it; the
+    axum adapter does this on every upgrade (`cleverhans_ws::SUBPROTOCOL`).
+    Every other value the client offers stays in the upgrade request's
+    `Sec-WebSocket-Protocol` header for the host's principal extractor to
+    read: a browser cannot set other headers on a WebSocket, so a token
+    often travels that way (`cleverhans_ws::offered_subprotocols` lists
+    those values). A client that offers no subprotocol connects without
+    one, and the server then sends no `Sec-WebSocket-Protocol` header.
+
+    The reference frontend offers `cleverhans.v0.1` first, then the
+    caller's values, whenever its caller passes `protocols`, and offers
+    nothing otherwise: a browser fails the connection when it offers a
+    subprotocol and the server selects none. Hosts that run their own
+    WebSocket server under the Node or Python binding select the name
+    themselves (the `ws` library's default selects the first value the
+    client offers, which is this name).
+
     Also the host's choice, because the binding does none of it: checking
     the `Origin` header (a host that authenticates by cookie should, in its
-    principal extractor or middleware), negotiating a subprotocol, sending
-    heartbeats, idle timeouts and message size limits (the WebSocket library's
-    defaults apply). The axum adapter selects no subprotocol, so a client
-    that offers one (for example to carry a token) fails the handshake
-    unless the host answers the upgrade itself. Pings from the client are
-    answered by the WebSocket library, not by the binding.
+    principal extractor or middleware), sending heartbeats, idle timeouts
+    and message size limits (the WebSocket library's defaults apply). Pings
+    from the client are answered by the WebSocket library, not by the
+    binding.
 
     ## Frames
 
@@ -55,6 +73,11 @@ info:
     - Binary frames carry nothing: the server drops them without an answer,
       and they do not count as a message (a binary frame before `Init` does
       not trigger `init_required`). The reference frontend never sends one.
+    - A text frame that is a JSON object whose `type` is a string the
+      receiver does not know is ignored without an answer (SPEC.md §13): the
+      envelope grows by new message types. It does not count as a message
+      either, so the next one must still be `Init`. The reference frontend
+      likewise ignores a `ServerEvent` type it does not know.
     - Delivery is ordered in each direction. The server handles one inbound
       frame at a time: it reads the next frame only after the turn the
       previous one started has finished (a streamed reply, a confirmed
@@ -66,26 +89,25 @@ info:
     ## Session
 
     1. **`Init` first.** The first message the server decodes must be
-       `Init` (SPEC.md §6.1). Any other message is answered with
-       `Error` `init_required` (`recoverable: false`) and the server ends the
-       session: it reads no further frames and drops the connection without
-       a WebSocket close frame (a browser reports close code `1006`). A
-       frame that fails to decode does not count as the first message: it
-       gets `malformed_event` and the next frame must still be `Init`. The
-       reference frontend queues events until the socket is open and sends
-       `Init` first.
+       `Init` (SPEC.md §6.1). Any other known message is answered with
+       `Error` `init_required` (`recoverable: false`), which ends the
+       session (item 6). A frame that fails to decode does not count as the
+       first message: it gets `malformed_event` and the next frame must
+       still be `Init`. A message of an unknown type does not count either:
+       it is ignored. The reference frontend queues events until the socket
+       is open and sends `Init` first.
     2. **Version.** An `Init` whose `spec_version` does not share the
        server's major.minor prefix (`0.1`, on a segment boundary: `0.1`,
        `0.1.0`, `0.1.0-draft`) is answered with `Error`
        `unsupported_spec_version` (`recoverable: false`) and its context is
-       not applied. The server does not close the session; it keeps
-       handling the frames that follow.
+       not applied. The error ends the session (item 6).
     3. **Malformed frames.** A text frame that is not valid JSON, is not an
-       object, has an unknown `type`, or lacks a required field or has one
-       of the wrong type is answered with `Error` `malformed_event`
-       (`recoverable: true`, `message` is the decoder's error text). The
-       session continues. This includes message types this binding does not
-       know yet.
+       object, has no `type` or a `type` that is not a string, or has a
+       known `type` but lacks a required field or has one of the wrong type
+       is answered with `Error` `malformed_event` (`recoverable: true`,
+       `message` is the decoder's error text). The session continues. A
+       message whose `type` is a string the server does not know is not
+       malformed: it is ignored without an answer (see Frames).
     4. **Later `Init`.** A second `Init` is accepted without an error: it
        replaces the context snapshot and resets the server's `context_seq`
        to 0. Proposals and conversation history stay.
@@ -96,11 +118,20 @@ info:
        `RejectAction` are answered with one `ProposalStateChanged` or one
        `Error`. `ContextUpdate` is answered with nothing, or with one
        `ProposalStateChanged` `expired` per pending proposal when the
-       `route` changed (SPEC.md §7.4).
-    6. **End.** The session ends when the client closes the connection, when
-       the server can no longer write to it, or after `init_required`. A
-       turn in progress when the client leaves runs to completion, including
-       the execution of a confirmed action; its remaining events are dropped.
+       `route` changed (SPEC.md §7.4), or with `Error` `stale_context`
+       (`recoverable: true`) when its `context_seq` is not greater than the
+       last one the session applied; a stale update is not applied
+       (SPEC.md §6.2).
+    6. **End.** An `Error` with `recoverable: false` ends the session
+       (SPEC.md §6.3): it is the last event the server sends, the server
+       processes no further frame, and it closes the connection with a
+       WebSocket close frame, code `1008` (policy violation), the error's
+       `code` as the reason (`init_required`, `unsupported_spec_version`).
+       It then waits briefly for the client's close frame. The session also
+       ends when the client closes the connection (the server answers its
+       close frame) or when the server can no longer write to it. A turn in
+       progress when the client leaves runs to completion, including the
+       execution of a confirmed action; its remaining events are dropped.
        A new connection is a new session: proposals of an earlier connection
        are unknown to it.
 
@@ -112,7 +143,9 @@ info:
     reported to the optional `onTransportError` callback and skipped; it
     does not end the session. The session ignores a `ServerEvent` whose
     `type` it does not know, and treats an unknown proposal `state` as
-    terminal (SPEC.md §11).
+    terminal (SPEC.md §11). Given `protocols`, the transport offers
+    `cleverhans.v0.1` first and the caller's values after it (see
+    Subprotocol); without, it offers none.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -176,6 +209,19 @@ channels:
     bindings:
       ws:
         method: GET
+        headers:
+          type: object
+          properties:
+            Sec-WebSocket-Protocol:
+              type: string
+              description: |
+                Optional. The subprotocols the client offers, comma-separated.
+                The server selects `cleverhans.v0.1` when it is among them;
+                other values (for example a token) are for the host's
+                principal extractor. Without the header the connection opens
+                without a subprotocol.
+              examples:
+                - cleverhans.v0.1, token-abc
         bindingVersion: 0.1.0
 
 operations:
@@ -217,11 +263,12 @@ components:
       summary: Opens the session; the first message on a stream (SPEC.md §6.1).
       description: |
         Carries the protocol version the client speaks and the initial
-        context snapshot. No answer on success. An incompatible
-        `spec_version` is answered with `Error` `unsupported_spec_version`.
-        Any other message before the first `Init` ends the session with
-        `Error` `init_required`. A later `Init` replaces the context and
-        resets `context_seq` to 0.
+        context snapshot, which is snapshot `context_seq` 0. No answer on
+        success. An incompatible `spec_version` is answered with `Error`
+        `unsupported_spec_version`, which ends the session. Any other known
+        message before the first `Init` ends the session with `Error`
+        `init_required`. A later `Init` replaces the context and resets
+        `context_seq` to 0.
       contentType: application/json
       payload:
         schemaFormat: application/schema+json;version=2020-12
@@ -250,10 +297,13 @@ components:
       title: ContextUpdate
       summary: Replaces the current context snapshot (SPEC.md §6.2).
       description: |
-        No answer, unless the `route` changed: then every proposal still
-        pending confirmation is expired, one `ProposalStateChanged`
-        (`expired`, reason `context changed`) each. The server records
-        `context_seq` as sent; it does not check that it grows.
+        `context_seq` must be greater than the last one the session applied
+        (`Init` is 0, so the first update carries 1 or more; the reference
+        frontend counts 1, 2, …). A stale update is not applied and is
+        answered with `Error` `stale_context` (`recoverable: true`).
+        Otherwise no answer, unless the `route` changed: then every proposal
+        still pending confirmation is expired, one `ProposalStateChanged`
+        (`expired`, reason `context changed`) each.
       contentType: application/json
       payload:
         schemaFormat: application/schema+json;version=2020-12
@@ -449,13 +499,21 @@ components:
 
         | `code` | `recoverable` | Sent by | When |
         |---|---|---|---|
-        | `malformed_event` | `true` | binding | A text frame does not decode as a `ClientEvent`: not JSON, not an object, unknown `type`, missing or mistyped field. The session continues. |
-        | `init_required` | `false` | binding | The first decoded message is not `Init`. The server then ends the session and drops the connection. |
-        | `unsupported_spec_version` | `false` | agent | `Init.spec_version` does not match the server's major.minor. The server does not close the session. |
+        `recoverable` says whether the session can continue. After an error
+        with `recoverable: false` the session is over: it is the last event,
+        the server processes no further frame and closes the connection with
+        code `1008` and the `code` as the reason (SPEC.md §6.3).
+
+        | `code` | `recoverable` | Sent by | When |
+        |---|---|---|---|
+        | `malformed_event` | `true` | binding | A text frame does not decode as a `ClientEvent`: not JSON, not an object, no `type` or a non-string `type`, or a known `type` with a missing or mistyped field. The session continues. (An unknown `type` is ignored, not answered.) |
+        | `init_required` | `false` | binding | The first decoded message is not `Init`. The session ends. |
+        | `unsupported_spec_version` | `false` | agent | `Init.spec_version` does not match the server's major.minor. The session ends. |
+        | `stale_context` | `true` | agent | `ContextUpdate.context_seq` is not greater than the last one the session applied; the update is not applied. |
         | `llm_error` | `true` | agent | The model provider failed during a `UserMessage` turn. An open text segment is closed with its `done: true` message first. |
         | `unknown_proposal` | `true` | agent | `ConfirmAction` names a proposal this session does not know. |
         | `invalid_reject` | `true` | agent | `RejectAction` names an unknown proposal or one no longer pending. |
-        | `encode_failed` | `false` | binding | Defensive fallback if an outbound event cannot be serialized; the envelope types always serialize, so it is not expected on the wire. |
+        | `encode_failed` | `false` | binding | Defensive fallback if an outbound event cannot be serialized; the session then ends. The envelope types always serialize, so it is not expected on the wire. |
 
         `message` is human-readable text for logs, not for matching.
       contentType: application/json
@@ -472,9 +530,16 @@ components:
             message: first message on a stream must be `init` (spec §6.1)
             recoverable: false
         - name: malformed-event
-          summary: A frame with an unknown type; the session continues.
+          summary: A user message without its client_msg_id; the session continues.
           payload:
             type: error
             code: malformed_event
-            message: unknown variant `frobnicate`, expected one of `init`, `context_update`, `user_message`, `confirm_action`, `reject_action` at line 1 column 20
+            message: missing field `client_msg_id`
+            recoverable: true
+        - name: stale-context
+          summary: A context update that did not advance context_seq; it is not applied.
+          payload:
+            type: error
+            code: stale_context
+            message: context_seq 8 is not greater than the last applied 8
             recoverable: true

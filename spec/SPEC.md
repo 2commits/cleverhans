@@ -1,8 +1,16 @@
 # CleverHans Protocol Specification
 
-**Version:** 0.1.5-draft
+**Version:** 0.1.6-draft
 **Status:** Draft
 **Tracking:** ED-536
+
+*Changes in 0.1.6: clarifications found while describing the WebSocket + JSON binding
+in `spec/asyncapi.yaml`, and one new error code. An `Error` with `recoverable: false`
+ends the session (§6.3); a receiver ignores a message type it does not know, and such a
+message is not the first message of a session (§6.1, §13); a `ContextUpdate` whose
+`context_seq` does not grow is not applied and is answered with the new error code
+`stale_context` (§6.2); §11 names the WebSocket binding's subprotocol and close code.
+The wire version remains `0.1`.*
 
 *Changes in 0.1.5: machine-readable JSON Schemas in `spec/schemas/` for the JSON
 encoding of the envelope (§6) and for the declarative registry document (§4), which
@@ -210,7 +218,8 @@ The JSON encoding of the envelope — each message an object tagged by a snake_c
 
 A session is one authenticated stream between one frontend and the agent, bound to one
 principal. The first client message MUST be `Init`. The agent MUST reject envelope
-traffic on unauthenticated streams (§10).
+traffic on unauthenticated streams (§10). A message the agent ignores because it does
+not know its type (§13) does not count as the first message.
 
 ### 6.2 Client → agent: `ClientEvent`
 
@@ -238,6 +247,13 @@ context = {
 Context flows one way: app → agent. It is the *only* channel through which
 context-sourced params get filled, which is why the model never touches them.
 
+**Context sequence.** The context carried by `Init` is snapshot `0`, so the first
+`ContextUpdate` of a session carries a `context_seq` of at least `1`. The agent MUST NOT
+apply a `ContextUpdate` whose `context_seq` is not greater than the `context_seq` of the
+last snapshot it applied; it answers that update with an `Error` whose `code` is
+`stale_context` and whose `recoverable` is `true`, and the current snapshot stays as it
+was.
+
 ### 6.3 Agent → client: `ServerEvent`
 
 | Message | Fields | Semantics |
@@ -258,6 +274,10 @@ sharing one `msg_id`:
 - Clients MUST key accumulation by `msg_id` and MUST replace any accumulated fragments
   with the `done: true` text.
 - A non-streaming sender emits a single `done: true` message per segment.
+
+**End of a session.** `Error.recoverable` tells whether the session can continue. After
+the agent sends an `Error` with `recoverable: false`, the session is over: the agent MUST
+NOT process any further client message on it, and the binding closes the stream (§11).
 
 ### 6.4 The proposal message
 
@@ -574,7 +594,10 @@ fail closed, render nothing new.
 
 Other conforming bindings (WebSocket + JSON-RPC, tRPC, SSE + POST upstream) are
 explicitly welcome. The WebSocket + JSON binding of the reference implementation is
-described formally by the AsyncAPI document [`spec/asyncapi.yaml`](asyncapi.yaml).
+described formally by the AsyncAPI document [`spec/asyncapi.yaml`](asyncapi.yaml). It
+selects the WebSocket subprotocol `cleverhans.v0.1` when the client offers it, and it
+closes a session that ended (§6.3) with WebSocket close code `1008` (policy violation)
+and the error's `code` as the close reason.
 Language-neutral conformance vectors for the behavior this
 spec mandates live in [`spec/vectors/`](vectors/README.md); a conforming
 implementation is expected to pass them. MCP is intentionally **not** the in-app transport — it earns its
@@ -628,7 +651,10 @@ Invariants 11–14 apply to the standalone service topology (§10.2):
 - **Spec:** semver on this document; `Init.spec_version` lets endpoints negotiate or
   reject.
 - **Envelope:** additive evolution only within a major version — new optional fields
-  and new message types; existing field semantics never change.
+  and new message types; existing field semantics never change. A receiver, agent or
+  client, MUST ignore a message whose type it does not know (in the JSON encoding, an
+  object whose `type` is a string the receiver does not know), without answering it. A
+  message of a known type with a missing or mistyped field is malformed, not unknown.
 - **Registry:** evolves freely and independently of the envelope; adding an action is
   an app-side edit plus codegen, with no protocol change. This decoupling is the point.
 - **Schemas:** the JSON Schemas in `spec/schemas/` follow this document's version (their

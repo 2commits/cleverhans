@@ -215,8 +215,9 @@ async def run_vector(fixture: dict[str, Any], vector: dict[str, Any]) -> None:
     else:  # binding layer: raw frames, flat expectation
         actual: list[dict[str, Any]] = []
         for frame in vector["frames"]:
-            if session.closed:
-                break  # the stream closed; a transport would read no further
+            # Frames after the end are still fed: a closed session must
+            # answer none of them (spec §6.3), and the exact expect list
+            # proves it.
             raw = frame["raw"] if "raw" in frame else json.dumps(frame["json"])
             actual.extend(await session.handle_collect(raw))
         expect_close = vector.get("expect_close", False)

@@ -61,8 +61,27 @@
 
 ## Transport
 
-- **Socket closes right after connect** — init-first violation (spec §6.1):
-  the first frame must be `init` with a compatible `spec_version`.
+- **Socket closes right after connect, close code `1008`** — the server
+  ended the session after a non-recoverable error (spec §6.3) and names it
+  in the close reason (the `error` event just before the close says the
+  same): `init_required` — the first message must be `init` (spec §6.1);
+  `unsupported_spec_version` — `init.spec_version` must share the server's
+  major.minor (`0.1`). After such an error the server answers nothing more
+  on that connection; open a new one. A close with `1006` and no reason is
+  a dropped connection, not a protocol error.
+- **The WebSocket handshake fails as soon as you pass `protocols`** — a
+  browser fails the connection when it offers subprotocols and the server
+  selects none. `createWebSocketTransport` offers `cleverhans.v0.1` first;
+  the server must select it. `cleverhans-ws` and the `ws` library's default
+  do; on FastAPI accept with `subprotocol=cleverhans_agent.SUBPROTOCOL`
+  (see the Python quickstart).
+- **`error` `stale_context`** — a `context_update` whose `context_seq` is not
+  greater than the last applied one (the `init` snapshot is 0) is refused
+  and not applied (spec §6.2). `AgentSession.updateContext` counts 1, 2, …
+  for you; a hand-written client must do the same, per connection.
+- **A message of a new type gets no answer** — by design (spec §13): a
+  receiver ignores a message type it does not know, so an older server
+  stays silent instead of answering `malformed_event`.
 - **FastAPI: `WARNING: No supported WebSocket library detected`** — install
   `uvicorn[standard]` (or `websockets`).
 - **Next.js: `WebSocket is not defined` during SSR** — upgrade: the

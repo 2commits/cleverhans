@@ -27,7 +27,12 @@ const session = new AgentSession(
 - `session.updateContext(...)` — call on navigation; the agent always knows
   where the user is, and stale proposals expire.
 - Transport auth is your app's (cookie, subprotocol token, ticket URL); the
-  envelope never carries credentials.
+  envelope never carries credentials. `createWebSocketTransport(url,
+  { protocols: [token] })` offers the binding's subprotocol `cleverhans.v0.1`
+  (`SUBPROTOCOL`) first and your values after it; without `protocols` it
+  offers none.
+- After an `error` with `recoverable: false` the server ends the session and
+  closes the socket with code 1008 and the error code as the reason.
 
 SSR-safe: without a `WebSocket` global the transport is inert, and the
 build carries `"use client"`. Generate `BlockSlotsMap`/`ActionParamsMap`

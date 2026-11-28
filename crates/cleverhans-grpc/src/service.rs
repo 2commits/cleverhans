@@ -2,8 +2,11 @@
 //!
 //! Transport-level rules enforced here, not in core: the stream must be
 //! authenticated before any envelope traffic (principal extraction from
-//! request metadata), and the first client message must be `Init`
-//! (spec §6.1).
+//! request metadata), the first client message must be `Init`
+//! (spec §6.1), a message with an empty `event` oneof — what a message type
+//! this proto does not know decodes to — is ignored (spec §13), and the
+//! session ends after an `Error` with `recoverable: false` (spec §6.3): the
+//! server stream then completes.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -78,6 +81,13 @@ pub async fn run_session<P, S>(
             span.set_reason("transport_error");
             return;
         };
+        if pb_event.event.is_none() {
+            // A newer client's message type is an unknown oneof field to
+            // this proto and decodes to an empty `event`: ignored without an
+            // answer, and not the first message (spec §13).
+            tracing::debug!("ignored client event with an empty or unknown oneof");
+            continue;
+        }
         let event = match convert::client_event(pb_event) {
             Ok(event) => event,
             Err(err) => {
@@ -111,19 +121,41 @@ pub async fn run_session<P, S>(
         };
         let forward = async {
             let mut receiver_alive = true;
+            let mut ended: Option<&'static str> = None;
             while let Some(server_event) = erx.recv().await {
-                if receiver_alive
-                    && tx
-                        .send(Ok(convert::server_event(server_event)))
-                        .await
-                        .is_err()
+                // Keep draining so `drive` never blocks; forward nothing
+                // after the receiver is gone or the session ended.
+                if !receiver_alive || ended.is_some() {
+                    continue;
+                }
+                // Spec §6.3: a non-recoverable error is the last event.
+                if let cleverhans_core::envelope::ServerEvent::Error {
+                    code,
+                    recoverable: false,
+                    ..
+                } = &server_event
+                {
+                    ended = Some(if code == "unsupported_spec_version" {
+                        "unsupported_spec_version"
+                    } else {
+                        "unrecoverable_error"
+                    });
+                }
+                if tx
+                    .send(Ok(convert::server_event(server_event)))
+                    .await
+                    .is_err()
                 {
                     receiver_alive = false;
                 }
             }
-            receiver_alive
+            (receiver_alive, ended)
         };
-        let ((), receiver_alive) = tokio::join!(drive, forward);
+        let ((), (receiver_alive, ended)) = tokio::join!(drive, forward);
+        if let Some(reason) = ended {
+            span.set_reason(reason);
+            return;
+        }
         if !receiver_alive {
             span.set_reason("client_gone");
             return;

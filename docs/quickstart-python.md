@@ -30,19 +30,35 @@ app = FastAPI()
 @app.websocket("/agent")
 async def agent_ws(websocket: WebSocket) -> None:
     principal = authenticate(websocket)  # your auth, before any frame
-    await websocket.accept()
+    offered = websocket.scope.get("subprotocols", [])
+    proto = cleverhans_agent.SUBPROTOCOL if cleverhans_agent.SUBPROTOCOL in offered else None
+    await websocket.accept(subprotocol=proto)
     session = agent.session(principal)
     try:
         while True:
             frame = await websocket.receive_text()
             async for event in session.handle(frame):
                 await websocket.send_json(event)
-            if session.closed:           # init-first violation: close, don't zombie
-                await websocket.close()
+            if session.closed:           # a non-recoverable error ended the session
+                await websocket.close(code=session.close_code, reason=session.close_reason)
                 return
     except WebSocketDisconnect:
         pass
 ```
+
+Two things the host's own WebSocket server owns, because the binding does not
+answer the upgrade:
+
+- **Subprotocol.** A client that offers subprotocols fails the handshake unless
+  the server selects one. Select `cleverhans_agent.SUBPROTOCOL`
+  (`"cleverhans.v0.1"`) when it is offered — `@cleverhans/react` offers it first
+  whenever you pass `protocols`, for example to carry a token, which your
+  `authenticate` then reads from `websocket.scope["subprotocols"]`.
+- **The end of a session.** After an `error` with `recoverable: false`
+  (`init_required`, `unsupported_spec_version`) the session is over:
+  `session.closed` is true and further frames yield nothing. Close the socket
+  with `session.close_code` (`1008`) and `session.close_reason` (the error code)
+  so the browser sees why, instead of `1006`.
 
 Raise `cleverhans_agent.Rejected("reason")` from a handler or dry-run to decline as
 a business rule (the proposal reports `failed` with your reason); any other

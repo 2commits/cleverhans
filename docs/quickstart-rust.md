@@ -95,8 +95,18 @@ let app = Router::new()
 ```
 
 Header/cookie auth at upgrade instead: implement `PrincipalExtractor` and use
-`agent_router("/agent", agent, Arc::new(MyExtractor))`. Non-axum hosts:
-`cleverhans-ws-core::run_session` over any socket you own.
+`agent_router("/agent", agent, Arc::new(MyExtractor))`. The routers select the
+subprotocol `cleverhans.v0.1` (`cleverhans::ws::SUBPROTOCOL`) whenever the
+client offers it; a token the frontend passes in `protocols` reaches your
+extractor through `cleverhans::ws::offered_subprotocols(&headers)`. When a
+non-recoverable error ends the session (`init_required`,
+`unsupported_spec_version`), the routers close the socket with code `1008` and
+the error code as the reason.
+
+Non-axum hosts: `cleverhans-ws-core::run_session` over any socket you own. It
+returns a `SessionExit`; on `SessionExit::Ended(end)` close the socket with
+`end.close_code()` and `end.close_reason()`, and select
+`cleverhans_ws_core::SUBPROTOCOL` at the upgrade when the client offers it.
 
 ## 4. Test offline
 

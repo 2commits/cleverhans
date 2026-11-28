@@ -234,9 +234,8 @@ export async function runVector(fixture: Script, vector: Script): Promise<void> 
   } else {
     const actual: ServerEvent[] = [];
     for (const frame of vector.frames) {
-      if (session.closed) {
-        break; // the stream closed; a transport would read no further
-      }
+      // Frames after the end are still fed: a closed session must answer
+      // none of them (spec §6.3), and the exact expect list proves it.
       const raw = "raw" in frame ? frame.raw : JSON.stringify(frame.json);
       actual.push(...(await session.handleCollect(raw)));
     }

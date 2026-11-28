@@ -29,7 +29,9 @@ use cleverhans_core::seams::{
     ActionHandler, AuthzDecision, AuthzResolver, CompletionItem, CompletionRequest,
     ContextParamResolver, DryRunHandler, LlmProvider, SlotBuilder,
 };
-use cleverhans_ffi::{FfiPrincipal, LlmSpec, assemble_registry, build_llm};
+use cleverhans_ffi::{
+    FfiPrincipal, FrameOutcome, LlmSpec, SUBPROTOCOL, SessionEnd, assemble_registry, build_llm,
+};
 
 /// Calls a Python callable and awaits its result if it is awaitable, so
 /// hosts may register `async def` and plain `def` interchangeably.
@@ -387,7 +389,7 @@ impl PyAgent {
             agent: Arc::clone(&self.inner),
             principal,
             worker: std::sync::Mutex::new(None),
-            closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            end: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 }
@@ -409,7 +411,18 @@ struct PySession {
     /// Lazily-started worker; task-locals are captured from the first
     /// `handle()` call, so one session belongs to one asyncio event loop.
     worker: std::sync::Mutex<Option<mpsc::UnboundedSender<Turn>>>,
-    closed: Arc<std::sync::atomic::AtomicBool>,
+    /// Why the session ended, once it has (a non-recoverable error, spec
+    /// §6.3). Set by the worker before the ending turn's stream finishes.
+    end: Arc<std::sync::Mutex<Option<SessionEnd>>>,
+}
+
+impl PySession {
+    fn end(&self) -> Option<SessionEnd> {
+        self.end
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 #[pymethods]
@@ -428,7 +441,7 @@ impl PySession {
                 let (turns_tx, mut turns_rx) = mpsc::unbounded_channel::<Turn>();
                 let agent = Arc::clone(&self.agent);
                 let principal = self.principal.clone();
-                let closed = Arc::clone(&self.closed);
+                let end = Arc::clone(&self.end);
                 pyo3_async_runtimes::tokio::get_runtime().spawn(pyo3_async_runtimes::tokio::scope(
                     locals,
                     async move {
@@ -436,8 +449,10 @@ impl PySession {
                         while let Some(turn) = turns_rx.recv().await {
                             let mut events = turn.events;
                             let outcome = pump.handle_frame(&agent, &turn.frame, &mut events).await;
-                            if outcome == cleverhans_ffi::FrameOutcome::Closed {
-                                closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                            if let FrameOutcome::Closed(session_end) = outcome {
+                                *end.lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                                    Some(session_end);
                             }
                         }
                     },
@@ -455,11 +470,27 @@ impl PySession {
         })
     }
 
-    /// Whether an init-first violation has closed the session (spec §6.1).
-    /// Once true, further frames yield no events; close your transport.
+    /// Whether the session is over: the server sent an error with
+    /// `recoverable: false` (spec §6.3), such as `init_required` or
+    /// `unsupported_spec_version`. Once true, further frames yield no
+    /// events; close your transport with `close_code` and `close_reason`.
     #[getter]
     fn closed(&self) -> bool {
-        self.closed.load(std::sync::atomic::Ordering::SeqCst)
+        self.end().is_some()
+    }
+
+    /// The WebSocket close code once the session is over (`1008`, policy
+    /// violation); `None` while it is open.
+    #[getter]
+    fn close_code(&self) -> Option<u16> {
+        self.end().map(|end| end.close_code())
+    }
+
+    /// The WebSocket close reason once the session is over: the `code` of
+    /// the error that ended it; `None` while it is open.
+    #[getter]
+    fn close_reason(&self) -> Option<String> {
+        self.end().map(|end| end.close_reason().to_owned())
     }
 }
 
@@ -497,6 +528,7 @@ fn generate_types(registry_json: &str, target: &str) -> PyResult<String> {
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add("SUBPROTOCOL", SUBPROTOCOL)?;
     module.add_class::<PyAgent>()?;
     module.add_class::<PySession>()?;
     module.add_class::<PyEventStream>()?;

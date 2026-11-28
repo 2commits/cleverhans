@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ServerEvent } from "../src/envelope";
-import { createWebSocketTransport } from "../src/websocket";
+import { SUBPROTOCOL, createWebSocketTransport } from "../src/websocket";
 
 type Listener = (event: { data?: unknown }) => void;
 
@@ -82,6 +82,40 @@ describe("createWebSocketTransport", () => {
     socket.dispatch("message", { data: "not json" });
 
     expect(errors).toHaveLength(1);
+  });
+
+  it("offers no subprotocol when the caller passes none", () => {
+    const offered: (string | string[] | undefined)[] = [];
+    createWebSocketTransport("wss://example/agent", {
+      webSocketFactory: (_url, protocols) => {
+        offered.push(protocols);
+        return new FakeWebSocket() as unknown as WebSocket;
+      },
+    });
+
+    expect(offered).toEqual([undefined]);
+  });
+
+  it("offers the binding's subprotocol first, then the caller's values", () => {
+    const offered: (string | string[] | undefined)[] = [];
+    const factory = (_url: string, protocols?: string | string[]) => {
+      offered.push(protocols);
+      return new FakeWebSocket() as unknown as WebSocket;
+    };
+
+    createWebSocketTransport("wss://example/agent", { protocols: "token-abc", webSocketFactory: factory });
+    createWebSocketTransport("wss://example/agent", {
+      protocols: ["token-abc", SUBPROTOCOL, "v2"],
+      webSocketFactory: factory,
+    });
+    createWebSocketTransport("wss://example/agent", { protocols: [], webSocketFactory: factory });
+
+    expect(SUBPROTOCOL).toBe("cleverhans.v0.1");
+    expect(offered).toEqual([
+      ["cleverhans.v0.1", "token-abc"],
+      ["cleverhans.v0.1", "token-abc", "v2"],
+      undefined,
+    ]);
   });
 
   it("close() closes the socket", () => {

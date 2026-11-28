@@ -427,6 +427,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tracing",
 ]
 
 [[package]]
@@ -557,6 +558,7 @@ dependencies = [
  "futures-util",
  "serde_json",
  "tokio",
+ "tokio-tungstenite 0.24.0",
 ]
 
 [[package]]

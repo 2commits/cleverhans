@@ -4,9 +4,11 @@
 //! re-exported from its single home:
 //!
 //! - [`FfiPrincipal`] — the concrete principal at the FFI boundary
-//! - [`FramePump`]/[`FrameOutcome`] — the per-frame session state machine
-//!   (re-exported from `cleverhans-ws-core`, the one implementation of the
-//!   spec §6.1 wire behavior)
+//! - [`FramePump`]/[`FrameOutcome`]/[`SessionEnd`] — the per-frame session
+//!   state machine and why a session ended (re-exported from
+//!   `cleverhans-ws-core`, the one implementation of the spec §6 wire
+//!   behavior), with [`SUBPROTOCOL`] and [`CLOSE_POLICY_VIOLATION`] for hosts
+//!   that run their own WebSocket server
 //! - [`LlmSpec`]/[`build_llm`] — declarative provider selection
 //! - [`assemble_registry`] — schema + host handler maps, with coverage
 //!   errors that name the missing callback
@@ -26,7 +28,9 @@ use cleverhans_core::seams::{ActionHandler, DryRunHandler, LlmProvider, SlotBuil
 
 pub use cleverhans::llm::LlmSpec;
 pub use cleverhans_conformance::fixture::{DeclarativeSlots, LlmItem, ScriptedLlm, SlotScript};
-pub use cleverhans_ws_core::{EventSink, FrameOutcome, FramePump};
+pub use cleverhans_ws_core::{
+    CLOSE_POLICY_VIOLATION, EventSink, FrameOutcome, FramePump, SUBPROTOCOL, SessionEnd,
+};
 
 /// The one principal type at the FFI boundary: an app-defined JSON identity
 /// blob (user id, org, roles, …). The framework never introspects it; seam
@@ -323,7 +327,10 @@ mod tests {
             )
             .await;
 
-        assert_eq!(outcome, FrameOutcome::Closed);
+        assert!(
+            matches!(&outcome, FrameOutcome::Closed(end) if end.code() == "init_required"),
+            "got {outcome:?}"
+        );
         assert!(pump.is_closed());
         assert!(out[0].contains("init_required"), "got {out:?}");
 
@@ -334,7 +341,7 @@ mod tests {
                 true
             })
             .await;
-        assert_eq!(post, FrameOutcome::Closed);
+        assert_eq!(post, outcome);
         assert_eq!(out.len(), 1, "no events after close: {out:?}");
     }
 

@@ -40,6 +40,7 @@ export {
 } from "./router";
 export { Proposal, useBlock } from "./primitives";
 export {
+  SUBPROTOCOL,
   createWebSocketTransport,
   type ClosableTransport,
   type WebSocketTransportOptions,

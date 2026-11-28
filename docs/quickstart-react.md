@@ -28,7 +28,19 @@ export function App() {
 
 Create the session once (`useMemo` / module scope); the app owns its
 lifetime. Auth rides your transport (cookie, WS subprotocol token, ticket
-URL) — the envelope never carries credentials.
+URL) — the envelope never carries credentials. A browser cannot set headers
+on a WebSocket, so a token often goes in `protocols`:
+`createWebSocketTransport(url, { protocols: [token] })` offers
+`cleverhans.v0.1` (exported as `SUBPROTOCOL`) first and your values after
+it; the server selects `cleverhans.v0.1` and its principal extractor reads
+the token from the `Sec-WebSocket-Protocol` header. Without `protocols` the
+transport offers no subprotocol.
+
+When the server ends the session after a non-recoverable `error`
+(`init_required`, `unsupported_spec_version`; `recoverable: false`), it
+closes the socket with code `1008` and the error code as the reason;
+`session.getSnapshot().lastError` holds the error. Open a new session to
+continue.
 
 **Keep context synced with navigation.** The agent targets whatever the
 context says the user is standing on, and navigating expires pending
