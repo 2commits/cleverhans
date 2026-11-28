@@ -186,7 +186,7 @@ Param match is a subset. Run: `cargo run -p cleverhans-demo -- eval crates/cleve
 
 ## TypeScript frontend
 
-Packages under `typescript/`: `@cleverhans/react` (headless: session store, hooks, block router, WS transport) and `@cleverhans/ui` (styled `AgentChat` / `FloatingChat` + default blocks). Also `@cleverhans/node` (Node binding). Canonical example: `typescript/playground/src/App.tsx`. Keep TS envelope/registry types in sync via `cleverhans-codegen --ts` (committed to `typescript/playground/src/generated/registry.ts`; freshness is pinned by a Rust test).
+Packages under `typescript/`: `@cleverhans/react` (headless: session store, hooks, block router, WS transport) and `@cleverhans/ui` (styled `AgentChat` / `FloatingChat` + default blocks). Also `@cleverhans/node` (Node binding). Canonical example: `typescript/playground/src/App.tsx`. Registry types come from `cleverhans-codegen --ts` (committed to `typescript/playground/src/generated/registry.ts`; freshness is pinned by a Rust test). Envelope types (`ActionProposal`, `DryRunPreview`, `ServerEvent`, `ErrorMessage` for the `error` message, `AppContext` for the context snapshot) are generated from `spec/schemas/{client,server}-event.json` into `typescript/cleverhans-react/src/generated/envelope.ts`: change the schema, never that file, then run `pnpm codegen` in `typescript/` (CI runs `pnpm codegen:check`). A proposal carries `type: "action_proposal"`; every `DryRunPreview` field is optional (absent `affected_count` means 0).
 
 ### Session setup
 

@@ -103,6 +103,25 @@ describe("AgentChat", () => {
     expect(screen.getByText("c_2")).toBeDefined();
   });
 
+  it("a bulk preview without affected_count reads as zero records", () => {
+    const transport = mountChat();
+
+    transport.emit({
+      type: "action_proposal",
+      proposal_id: "prop-3",
+      action_id: "contacts.deleteByPredicate",
+      params: {},
+      block_type: "bulk_preview",
+      slots: { title: "Delete stale contacts" },
+      // `{}` is a valid empty preview; an absent count means 0.
+      preview: {},
+      context_seq: 0,
+    });
+
+    expect(screen.getByText("0")).toBeDefined();
+    expect(screen.getByText(/records/)).toBeDefined();
+  });
+
   it("the full conversation stays visible as a flow", () => {
     const transport = mountChat();
 

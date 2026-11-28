@@ -79,7 +79,7 @@ function Preview(props: {
     <div
       className={props.className}
       data-cleverhans-preview
-      data-affected-count={preview.affected_count}
+      data-affected-count={preview.affected_count ?? 0}
     >
       {props.children ? props.children(preview) : (preview.summary ?? "")}
     </div>
