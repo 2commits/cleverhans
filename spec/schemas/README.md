@@ -198,9 +198,9 @@ Run it with `cargo test -p cleverhans-core --test spec_schema_growth`.
   [AsyncAPI Studio](https://studio.asyncapi.com) from a place where the
   relative `./schemas/` references resolve; pasted into Studio's editor on
   its own, the payloads stay unresolved. The AsyncAPI CLI (not a dependency
-  of this repository) bundles the references into a local read-only
-  preview: `asyncapi start preview spec/asyncapi.yaml`. There is no hosted
-  reference site.
+  of this repository) documents a local read-only preview that bundles the
+  references, `asyncapi start preview spec/asyncapi.yaml`; this repository
+  does not run or test that command. There is no hosted reference site.
 - **Host webhook contract (SPEC.md §14):** request and response bodies in
   [`spec/webhook/schemas/`](../webhook/schemas/), kept in step with the Rust
   wire types by `crates/cleverhans-webhook/tests/wire_schema_sync.rs`.
