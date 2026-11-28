@@ -1,4 +1,7 @@
 packages:
   - "*"
 allowBuilds:
+  # Install-time usage analytics, pulled in by @asyncapi/parser through
+  # @stoplight/spectral-*; nothing needs its postinstall.
+  '@scarf/scarf': false
   esbuild: true

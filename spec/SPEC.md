@@ -573,7 +573,9 @@ Frontends MUST treat an unrecognized state as terminal and act on it no further 
 fail closed, render nothing new.
 
 Other conforming bindings (WebSocket + JSON-RPC, tRPC, SSE + POST upstream) are
-explicitly welcome. Language-neutral conformance vectors for the behavior this
+explicitly welcome. The WebSocket + JSON binding of the reference implementation is
+described formally by the AsyncAPI document [`spec/asyncapi.yaml`](asyncapi.yaml).
+Language-neutral conformance vectors for the behavior this
 spec mandates live in [`spec/vectors/`](vectors/README.md); a conforming
 implementation is expected to pass them. MCP is intentionally **not** the in-app transport — it earns its
 place only for *external* agents driving the same action registry; for a first-party

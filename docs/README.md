@@ -8,7 +8,9 @@ its own normal authorized path after explicit user confirmation.
 The normative protocol is [`spec/SPEC.md`](../spec/SPEC.md); everything here
 is the practical integration layer over it. Its machine-readable JSON Schemas
 (the envelope's JSON encoding, the registry document) and pointers to every
-other formal definition are in [`spec/schemas/`](../spec/schemas/README.md).
+other formal definition, among them the AsyncAPI document of the WebSocket +
+JSON binding ([`spec/asyncapi.yaml`](../spec/asyncapi.yaml)), are in
+[`spec/schemas/`](../spec/schemas/README.md).
 
 ## Quickstarts — host the agent from your backend
 

@@ -1,0 +1,480 @@
+# AsyncAPI description of the WebSocket + JSON binding of the CleverHans
+# envelope, as the reference implementation runs it: the session loop in
+# crates/cleverhans-ws-core, its axum adapter crates/cleverhans-ws, and the
+# browser side in typescript/cleverhans-react/src/websocket.ts.
+#
+# The payloads are not copied here: each message points at its entry in
+# schemas/client-event.json or schemas/server-event.json. Check this file from
+# typescript/ with `pnpm spec:check` (scripts/check-asyncapi.mjs); CI's web job
+# runs it.
+asyncapi: 3.1.0
+
+info:
+  title: CleverHans envelope over WebSocket + JSON
+  version: '0.1'
+  description: |
+    The WebSocket + JSON binding of the CleverHans envelope
+    ([SPEC.md](https://github.com/2commits/cleverhans/blob/main/spec/SPEC.md)
+    §6, §11), as the reference implementation runs it. `SPEC.md` stays
+    normative; this document describes one binding of it. `info.version` is
+    the wire version (`Init.spec_version`, SPEC.md §13).
+
+    The document is written from the point of view of the **app frontend**:
+    it sends the five `ClientEvent` messages and receives the four
+    `ServerEvent` messages. The agent does the mirror image.
+
+    ## Connection and authentication
+
+    One WebSocket connection carries one session (SPEC.md §6.1), bound to one
+    principal. The frontend opens it with an HTTP `GET` upgrade request to a
+    path the host chooses (the reference crates take it as an argument;
+    `/agent` is what the demo, the examples and `cleverhans serve` use).
+
+    Authentication is the host's choice (SPEC.md §10): the host maps the
+    upgrade request's headers (cookie, bearer token, …) to its principal
+    before the upgrade is accepted. A refused request gets an HTTP status
+    (typically `401`; `cleverhans serve` answers `503` when its
+    `verify_session` webhook fails) and never becomes a socket, so no
+    envelope traffic flows on an unauthenticated stream. The envelope itself
+    never carries credentials.
+
+    Also the host's choice, because the binding does none of it: checking
+    the `Origin` header (a host that authenticates by cookie should, in its
+    principal extractor or middleware), negotiating a subprotocol, sending
+    heartbeats, idle timeouts and message size limits (the WebSocket library's
+    defaults apply). The axum adapter selects no subprotocol, so a client
+    that offers one (for example to carry a token) fails the handshake
+    unless the host answers the upgrade itself. Pings from the client are
+    answered by the WebSocket library, not by the binding.
+
+    ## Frames
+
+    - Each text frame carries exactly one envelope message: a JSON object
+      whose `type` names the message in snake_case, its fields beside the
+      tag. The server sends each `ServerEvent` as its own text frame.
+    - Binary frames carry nothing: the server drops them without an answer,
+      and they do not count as a message (a binary frame before `Init` does
+      not trigger `init_required`). The reference frontend never sends one.
+    - Delivery is ordered in each direction. The server handles one inbound
+      frame at a time: it reads the next frame only after the turn the
+      previous one started has finished (a streamed reply, a confirmed
+      action's execution). Frames sent meanwhile wait in order; nothing
+      cancels a running turn.
+    - Unknown fields in a message are ignored in both directions (SPEC.md
+      §13).
+
+    ## Session
+
+    1. **`Init` first.** The first message the server decodes must be
+       `Init` (SPEC.md §6.1). Any other message is answered with
+       `Error` `init_required` (`recoverable: false`) and the server ends the
+       session: it reads no further frames and drops the connection without
+       a WebSocket close frame (a browser reports close code `1006`). A
+       frame that fails to decode does not count as the first message: it
+       gets `malformed_event` and the next frame must still be `Init`. The
+       reference frontend queues events until the socket is open and sends
+       `Init` first.
+    2. **Version.** An `Init` whose `spec_version` does not share the
+       server's major.minor prefix (`0.1`, on a segment boundary: `0.1`,
+       `0.1.0`, `0.1.0-draft`) is answered with `Error`
+       `unsupported_spec_version` (`recoverable: false`) and its context is
+       not applied. The server does not close the session; it keeps
+       handling the frames that follow.
+    3. **Malformed frames.** A text frame that is not valid JSON, is not an
+       object, has an unknown `type`, or lacks a required field or has one
+       of the wrong type is answered with `Error` `malformed_event`
+       (`recoverable: true`, `message` is the decoder's error text). The
+       session continues. This includes message types this binding does not
+       know yet.
+    4. **Later `Init`.** A second `Init` is accepted without an error: it
+       replaces the context snapshot and resets the server's `context_seq`
+       to 0. Proposals and conversation history stay.
+    5. **Turns.** `UserMessage` starts a model turn: zero or more
+       `ChatMessage` segments (streamed as `done: false` fragments, closed
+       by one authoritative `done: true` message) and `ActionProposal`
+       messages, or an `Error` `llm_error`. `ConfirmAction` and
+       `RejectAction` are answered with one `ProposalStateChanged` or one
+       `Error`. `ContextUpdate` is answered with nothing, or with one
+       `ProposalStateChanged` `expired` per pending proposal when the
+       `route` changed (SPEC.md §7.4).
+    6. **End.** The session ends when the client closes the connection, when
+       the server can no longer write to it, or after `init_required`. A
+       turn in progress when the client leaves runs to completion, including
+       the execution of a confirmed action; its remaining events are dropped.
+       A new connection is a new session: proposals of an earlier connection
+       are unknown to it.
+
+    ## Frontend side
+
+    `createWebSocketTransport` in `@cleverhans/react` serializes each
+    `ClientEvent` with `JSON.stringify` into one text frame and parses each
+    inbound text frame with `JSON.parse`. A frame that does not parse is
+    reported to the optional `onTransportError` callback and skipped; it
+    does not end the session. The session ignores a `ServerEvent` whose
+    `type` it does not know, and treats an unknown proposal `state` as
+    terminal (SPEC.md §11).
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  externalDocs:
+    description: The CleverHans protocol specification (normative)
+    url: https://github.com/2commits/cleverhans/blob/main/spec/SPEC.md
+
+defaultContentType: application/json
+
+servers:
+  app:
+    host: '{host}'
+    protocol: wss
+    title: The app's backend
+    description: |
+      The backend that mounts the binding: the app's own server (in-backend
+      topology, SPEC.md §10.1) or the standalone `cleverhans serve` binary
+      (SPEC.md §10.2). Host, port, path and authentication are the host's
+      choice.
+    variables:
+      host:
+        description: Host name, and port if not the default, of the backend.
+        default: app.example.com
+  local-demo:
+    host: 127.0.0.1:8787
+    protocol: ws
+    title: Local demo
+    description: |
+      `cargo run -p cleverhans-demo -- serve`. Plain `ws` is for local
+      development only; the demo treats every connection as the same demo
+      user.
+
+channels:
+  session:
+    address: /agent
+    title: Envelope session
+    description: |
+      The WebSocket connection itself: one connection is one envelope
+      session. The path is the host's choice; `/agent` is the value the
+      demo, the examples and `cleverhans serve` (its `[server] path`
+      setting) use.
+    messages:
+      Init:
+        $ref: '#/components/messages/Init'
+      ContextUpdate:
+        $ref: '#/components/messages/ContextUpdate'
+      UserMessage:
+        $ref: '#/components/messages/UserMessage'
+      ConfirmAction:
+        $ref: '#/components/messages/ConfirmAction'
+      RejectAction:
+        $ref: '#/components/messages/RejectAction'
+      ChatMessage:
+        $ref: '#/components/messages/ChatMessage'
+      ActionProposal:
+        $ref: '#/components/messages/ActionProposal'
+      ProposalStateChanged:
+        $ref: '#/components/messages/ProposalStateChanged'
+      Error:
+        $ref: '#/components/messages/Error'
+    bindings:
+      ws:
+        method: GET
+        bindingVersion: 0.1.0
+
+operations:
+  sendClientEvent:
+    action: send
+    channel:
+      $ref: '#/channels/session'
+    title: Send a ClientEvent
+    summary: The frontend sends one ClientEvent per text frame (SPEC.md §6.2).
+    description: |
+      `Init` first, then any of the others in any order. The server handles
+      them one at a time, in the order they arrive.
+    messages:
+      - $ref: '#/channels/session/messages/Init'
+      - $ref: '#/channels/session/messages/ContextUpdate'
+      - $ref: '#/channels/session/messages/UserMessage'
+      - $ref: '#/channels/session/messages/ConfirmAction'
+      - $ref: '#/channels/session/messages/RejectAction'
+  receiveServerEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/session'
+    title: Receive a ServerEvent
+    summary: The frontend receives one ServerEvent per text frame (SPEC.md §6.3).
+    description: |
+      Events arrive in the order the agent emits them. Chat fragments are
+      sent while the model is still generating, not after the turn.
+    messages:
+      - $ref: '#/channels/session/messages/ChatMessage'
+      - $ref: '#/channels/session/messages/ActionProposal'
+      - $ref: '#/channels/session/messages/ProposalStateChanged'
+      - $ref: '#/channels/session/messages/Error'
+
+components:
+  messages:
+    Init:
+      name: Init
+      title: Init
+      summary: Opens the session; the first message on a stream (SPEC.md §6.1).
+      description: |
+        Carries the protocol version the client speaks and the initial
+        context snapshot. No answer on success. An incompatible
+        `spec_version` is answered with `Error` `unsupported_spec_version`.
+        Any other message before the first `Init` ends the session with
+        `Error` `init_required`. A later `Init` replaces the context and
+        resets `context_seq` to 0.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/client-event.json#/$defs/Init'
+      examples:
+        - name: detail-page
+          summary: Open a session on a transaction's detail page.
+          payload:
+            type: init
+            spec_version: 0.1.0-draft
+            context:
+              route: /transactions/tx_581
+              selected_record_id: tx_581
+              view_type: detail
+        - name: minimal
+          summary: Only the required fields.
+          payload:
+            type: init
+            spec_version: '0.1'
+            context:
+              route: /transactions
+
+    ContextUpdate:
+      name: ContextUpdate
+      title: ContextUpdate
+      summary: Replaces the current context snapshot (SPEC.md §6.2).
+      description: |
+        No answer, unless the `route` changed: then every proposal still
+        pending confirmation is expired, one `ProposalStateChanged`
+        (`expired`, reason `context changed`) each. The server records
+        `context_seq` as sent; it does not check that it grows.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/client-event.json#/$defs/ContextUpdate'
+      examples:
+        - name: navigate-to-list
+          summary: The user navigates from the detail page back to the list.
+          payload:
+            type: context_update
+            context_seq: 8
+            context:
+              route: /transactions
+
+    UserMessage:
+      name: UserMessage
+      title: UserMessage
+      summary: A user chat turn (SPEC.md §6.2).
+      description: |
+        Starts a model turn, answered with `ChatMessage` segments and
+        `ActionProposal` messages, or with `Error` `llm_error` when the model
+        provider fails. A tool call that fails validation is never sent; the
+        agent retries or declines in a `ChatMessage`.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/client-event.json#/$defs/UserMessage'
+      examples:
+        - name: remove-co-buyer
+          summary: A request that leads to a proposal.
+          payload:
+            type: user_message
+            text: remove the co-buyer
+            client_msg_id: c-1
+
+    ConfirmAction:
+      name: ConfirmAction
+      title: ConfirmAction
+      summary: The user confirms a proposal (SPEC.md §7.3).
+      description: |
+        Revalidates the proposal against the current state and executes it.
+        Answered with one `ProposalStateChanged`: `executed` (with `result`),
+        `failed` (with `reason`) or `expired` (revalidation failed). For a
+        proposal no longer pending it reports the actual state and executes
+        nothing; for an ID the session does not know it answers `Error`
+        `unknown_proposal`.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/client-event.json#/$defs/ConfirmAction'
+      examples:
+        - name: confirm
+          summary: Confirm the first proposal of the session.
+          payload:
+            type: confirm_action
+            proposal_id: prop-1
+
+    RejectAction:
+      name: RejectAction
+      title: RejectAction
+      summary: The user declines a proposal (SPEC.md §6.2).
+      description: |
+        Answered with `ProposalStateChanged` `rejected`, echoing the reason.
+        For an unknown ID, or a proposal no longer pending, it answers
+        `Error` `invalid_reject`.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/client-event.json#/$defs/RejectAction'
+      examples:
+        - name: with-reason
+          summary: Reject with a reason the model sees in the next turn.
+          payload:
+            type: reject_action
+            proposal_id: prop-1
+            reason: changed my mind
+        - name: without-reason
+          summary: Reject without a reason.
+          payload:
+            type: reject_action
+            proposal_id: prop-1
+
+    ChatMessage:
+      name: ChatMessage
+      title: ChatMessage
+      summary: Assistant prose (SPEC.md §6.3).
+      description: |
+        One text segment arrives as zero or more `done: false` fragments,
+        then exactly one `done: true` message with the authoritative full
+        text, all with the same `msg_id`. The reference agent numbers
+        `msg_id`s `msg-1`, `msg-2`, … per session; clients treat them as
+        opaque.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/server-event.json#/$defs/ChatMessage'
+      examples:
+        - name: fragment
+          summary: A streamed fragment.
+          payload:
+            type: chat_message
+            msg_id: msg-1
+            text: 'Hello! Open a '
+            done: false
+        - name: final
+          summary: The closing message with the full text of the segment.
+          payload:
+            type: chat_message
+            msg_id: msg-1
+            text: Hello! Open a transaction and I can help.
+            done: true
+
+    ActionProposal:
+      name: ActionProposal
+      title: ActionProposal
+      summary: A validated proposal, ready to render (SPEC.md §6.4).
+      description: |
+        The proposal fields sit beside `type`. The reference agent numbers
+        `proposal_id`s `prop-1`, `prop-2`, … per session; clients treat them
+        as opaque. It writes `preview` and `turn_msg_id` as `null` when they
+        are empty.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/server-event.json#/$defs/ActionProposal'
+      examples:
+        - name: remove-co-buyer
+          summary: A mutating action, so the preview is present.
+          payload:
+            type: action_proposal
+            proposal_id: prop-1
+            action_id: transaction.coBuyer.remove
+            params:
+              transactionId: tx_581
+            block_type: confirm
+            slots:
+              title: Remove co-buyer
+              detail: Remove co-buyer Jane Doe from TX-581
+            preview:
+              affected_count: 1
+              sample_ids:
+                - cb_112
+              summary: Remove co-buyer Jane Doe from TX-581
+              extensions: {}
+            context_seq: 0
+            turn_msg_id: null
+
+    ProposalStateChanged:
+      name: ProposalStateChanged
+      title: ProposalStateChanged
+      summary: A proposal's lifecycle transition after emission (SPEC.md §7).
+      description: |
+        The reference agent sends `executed`, `failed`, `expired` and
+        `rejected`, and for a confirm of a proposal no longer pending the
+        state it is in. `state` is a plain string: a frontend treats a state
+        it does not know as terminal (SPEC.md §11).
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/server-event.json#/$defs/ProposalStateChanged'
+      examples:
+        - name: executed
+          summary: The handler ran; its result comes back.
+          payload:
+            type: proposal_state_changed
+            proposal_id: prop-1
+            state: executed
+            reason: null
+            result:
+              removed: true
+        - name: expired
+          summary: A route change expired a pending proposal.
+          payload:
+            type: proposal_state_changed
+            proposal_id: prop-1
+            state: expired
+            reason: context changed
+            result: null
+
+    Error:
+      name: Error
+      title: Error
+      summary: A stream- or turn-level error that is not a proposal state change (SPEC.md §6.3).
+      description: |
+        The reference implementation sends these codes; a client must still
+        accept others.
+
+        | `code` | `recoverable` | Sent by | When |
+        |---|---|---|---|
+        | `malformed_event` | `true` | binding | A text frame does not decode as a `ClientEvent`: not JSON, not an object, unknown `type`, missing or mistyped field. The session continues. |
+        | `init_required` | `false` | binding | The first decoded message is not `Init`. The server then ends the session and drops the connection. |
+        | `unsupported_spec_version` | `false` | agent | `Init.spec_version` does not match the server's major.minor. The server does not close the session. |
+        | `llm_error` | `true` | agent | The model provider failed during a `UserMessage` turn. An open text segment is closed with its `done: true` message first. |
+        | `unknown_proposal` | `true` | agent | `ConfirmAction` names a proposal this session does not know. |
+        | `invalid_reject` | `true` | agent | `RejectAction` names an unknown proposal or one no longer pending. |
+        | `encode_failed` | `false` | binding | Defensive fallback if an outbound event cannot be serialized; the envelope types always serialize, so it is not expected on the wire. |
+
+        `message` is human-readable text for logs, not for matching.
+      contentType: application/json
+      payload:
+        schemaFormat: application/schema+json;version=2020-12
+        schema:
+          $ref: './schemas/server-event.json#/$defs/Error'
+      examples:
+        - name: init-required
+          summary: The first message on the stream was not Init; the session ends.
+          payload:
+            type: error
+            code: init_required
+            message: first message on a stream must be `init` (spec §6.1)
+            recoverable: false
+        - name: malformed-event
+          summary: A frame with an unknown type; the session continues.
+          payload:
+            type: error
+            code: malformed_event
+            message: unknown variant `frobnicate`, expected one of `init`, `context_update`, `user_message`, `confirm_action`, `reject_action` at line 1 column 20
+            recoverable: true
