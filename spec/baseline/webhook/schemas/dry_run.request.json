@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/dry_run.request.json",
+  "title": "dry_run request (SPEC.md §14.5)",
+  "type": "object",
+  "required": ["webhook_version", "kind", "session_id", "action_id", "params", "principal"],
+  "additionalProperties": false,
+  "properties": {
+    "webhook_version": { "const": 1 },
+    "kind": { "const": "dry_run" },
+    "session_id": { "type": "string" },
+    "action_id": { "type": "string" },
+    "params": { "type": "object" },
+    "principal": {
+      "description": "Verbatim echo of the verify_session principal (§12.13)."
+    }
+  }
+}
