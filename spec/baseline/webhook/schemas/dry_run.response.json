@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/dry_run.response.json",
+  "title": "dry_run 200 response (SPEC.md §14.5)",
+  "type": "object",
+  "required": ["outcome"],
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": { "const": "preview" },
+        "preview": {
+          "type": "object",
+          "description": "The SPEC.md §6.4 DryRunPreview shape. Every field defaults; {} is a valid empty preview. MUST be side-effect-free and permission-correct (§12.7).",
+          "properties": {
+            "affected_count": { "type": "integer", "default": 0 },
+            "sample_ids": { "type": "array", "items": { "type": "string" }, "default": [] },
+            "summary": { "type": ["string", "null"] },
+            "extensions": { "type": "object", "default": {} }
+          }
+        }
+      },
+      "required": ["outcome", "preview"]
+    },
+    {
+      "properties": {
+        "outcome": { "const": "rejected" },
+        "reason": { "type": "string" }
+      },
+      "required": ["outcome"]
+    }
+  ]
+}

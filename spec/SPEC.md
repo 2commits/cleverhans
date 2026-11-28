@@ -639,6 +639,11 @@ Invariants 11–14 apply to the standalone service topology (§10.2):
   contract is a binding-layer artifact: it evolves additively (new optional fields, new
   optional endpoints) without touching envelope or registry versioning.
 
+The reference repository enforces the additive rule for the JSON Schemas in
+`spec/schemas/` and `spec/webhook/schemas/`: a test compares each with its snapshot from
+the last release in `spec/baseline/` and fails on any change that is not an addition,
+unless `spec/baseline/breaks.json` records the break with a reason.
+
 ## 14. Host webhook contract (service topology)
 
 The normative wire contract between an agent service (§10.2) and the host application.

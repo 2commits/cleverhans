@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/webhook/v1/execute.request.json",
+  "title": "execute request (SPEC.md §14.6)",
+  "type": "object",
+  "required": ["webhook_version", "kind", "session_id", "action_id", "params", "principal", "idempotency_key", "attempt"],
+  "additionalProperties": false,
+  "properties": {
+    "webhook_version": { "const": 1 },
+    "kind": { "const": "execute" },
+    "session_id": { "type": "string" },
+    "action_id": { "type": "string" },
+    "params": { "type": "object" },
+    "principal": {
+      "description": "Verbatim echo of the verify_session principal (§12.13)."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "Minted once per confirmed execution; stable across retry attempts. Hosts MUST execute at most once per key (§12.14)."
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based; increments per retry attempt."
+    }
+  }
+}
