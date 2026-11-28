@@ -90,6 +90,65 @@ or a schema without its type:
 
 Run it with `cargo test -p cleverhans-core --test spec_schemas`.
 
+## How the schemas only grow
+
+The envelope and the webhook contract evolve additively (SPEC.md §13).
+[`crates/cleverhans-core/tests/spec_schema_growth.rs`](../../crates/cleverhans-core/tests/spec_schema_growth.rs)
+enforces that for every schema here and in
+[`spec/webhook/schemas/`](../webhook/schemas/), as part of `cargo test`.
+
+- **The baseline.** [`spec/baseline/`](../baseline/) holds the schemas as the
+  last release had them, at the same paths (`spec/baseline/schemas/…`,
+  `spec/baseline/webhook/schemas/…`). The files are byte-for-byte copies;
+  never edit them by hand.
+- **The rule.** A schema may differ from its baseline only by additions: a
+  new property that is not in `required`, a new `$defs` entry, a new
+  `oneOf`/`anyOf` alternative, a new `enum` value, or any change to an
+  annotation (`title`, `description`, `$comment`, `examples`, `default`,
+  `deprecated`). What sits inside a new property, definition or
+  alternative is free, and so is a new schema file. Everything else is a
+  break: a removed property, definition, alternative, enum value or file; a
+  change to `required` in either direction; a new required property in an
+  existing shape; any other keyword added, removed or changed (`type`,
+  `const`, `pattern`, `minimum`, `maximum`, `items`,
+  `additionalProperties`, `$ref`, `$id`, `$schema`, …). A loosening counts
+  too: a wider `type`, a higher `maximum` or a looser `pattern` is a break.
+  The order of `required`, `enum` and the alternatives does not matter;
+  alternatives are matched by `$ref`, else by the `const` of a
+  discriminator property, else by `type`, and otherwise by position — add
+  such an alternative at the end.
+- **Accepting a break.** The test prints each break as a JSON Pointer into
+  the baseline file and a kind, with an entry ready to paste. A deliberate,
+  decided break goes into
+  [`spec/baseline/breaks.json`](../baseline/breaks.json), a list of entries:
+
+  ```json
+  [
+    {
+      "schema": "schemas/client-event.json",
+      "pointer": "/$defs/Init/properties/context",
+      "kind": "property-removed",
+      "reason": "One sentence: why the break is needed.",
+      "version": "spec 0.2.0"
+    }
+  ]
+  ```
+
+  `schema` is the path under `spec/`; `pointer` is empty only for
+  `file-removed`; `version` is `spec <version>` for `spec/schemas/` and
+  `webhook <n>` for `spec/webhook/schemas/`. The kinds are
+  `file-removed`, `property-removed`, `def-removed`,
+  `alternative-removed`, `enum-value-removed`, `made-required`,
+  `made-optional`, `new-required-property`, `keyword-added`,
+  `keyword-removed` and `keyword-changed`. The test validates the file,
+  and an entry whose break the comparison no longer finds fails as stale,
+  so the list stays honest.
+- **Refreshing the baseline.** `scripts/snapshot-schemas.sh` copies the
+  current schemas over the baseline and resets `breaks.json` to `[]`. It
+  is run when a release is cut ([`docs/releasing.md`](../../docs/releasing.md)).
+
+Run it with `cargo test -p cleverhans-core --test spec_schema_growth`.
+
 ## Other formal definitions
 
 - **Host webhook contract (SPEC.md §14):** request and response bodies in

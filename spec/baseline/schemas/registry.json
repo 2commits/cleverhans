@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cleverhans.dev/spec/v0.1/registry.json",
+  "title": "Registry document (SPEC.md §4)",
+  "description": "The declarative registry document of the reference implementation: the wire-visible registry data — every SPEC.md §4 field except the backend-private `handler` and `dry_run` — as a versioned JSON file. The app loads it, attaches handlers by action ID and builds; the same document is the codegen input and the interchange format for conformance fixtures and non-Rust registry authors. It never crosses the wire. SPEC.md calls this serialization non-normative. The document is closed: an unknown field at any level is an error, exactly as `RegistrySchema::from_json` in crates/cleverhans-core/src/schema.rs rejects it. Kept in step with that type by crates/cleverhans-core/tests/spec_schemas.rs.",
+  "type": "object",
+  "required": ["spec_version", "blocks", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": ["string", "null"],
+      "description": "Optional URI reference of this JSON Schema, for editors that validate and autocomplete the document. Carried through loading and export unchanged; the framework never fetches it. Absent and null both mean no reference."
+    },
+    "spec_version": {
+      "type": "string",
+      "description": "Spec version the document targets (SPEC.md §13). Checked at load against the implemented version by major.minor prefix on a segment boundary, mirroring the `Init` handshake: for `0.1`, the values `0.1`, `0.1.0` and `0.1.0-draft` load while `0.10` and `0.1x` do not."
+    },
+    "blocks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/BlockDef" },
+      "description": "Registered block types (SPEC.md §8)."
+    },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ActionDef" },
+      "description": "Registered action definitions (SPEC.md §4)."
+    },
+    "context_params": {
+      "type": "object",
+      "description": "Declarative context-param filling: param name → context path. A path is one of `route`, `selected_record_id`, `view_type`, `params.<key>` or `extensions.<key>`, where `<key>` is a single non-empty literal map key (no nested traversal; a key may itself contain dots). Paths are validated at load. Apps that fill context params with their own resolver leave this empty. Absent means an empty map.",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(route|selected_record_id|view_type|(params|extensions)\\.[\\s\\S]+)$"
+      }
+    }
+  },
+  "$defs": {
+    "BlockDef": {
+      "title": "BlockDef",
+      "description": "A registered UI block type with its slot schema (SPEC.md §8).",
+      "type": "object",
+      "required": ["block_type", "slots"],
+      "additionalProperties": false,
+      "properties": {
+        "block_type": {
+          "type": "string",
+          "description": "The closed-enum identifier the frontend routes on."
+        },
+        "slots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SlotSpec" },
+          "description": "Slot schema."
+        }
+      }
+    },
+    "SlotSpec": {
+      "title": "SlotSpec",
+      "description": "One slot of a block type.",
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Slot name." },
+        "type": { "$ref": "#/$defs/ValueType", "description": "Value type." },
+        "required": { "type": "boolean", "description": "Whether the slot must be filled." }
+      }
+    },
+    "ActionDef": {
+      "title": "ActionDef",
+      "description": "The wire-visible metadata of one action (SPEC.md §4).",
+      "type": "object",
+      "required": ["id", "description", "params", "block_type", "mutates", "authz_key"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Inert, hand-authored, opaque key (SPEC.md §3)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Intent-matching surface presented to the model. Load-bearing: this is the tuning and evaluation surface."
+        },
+        "params": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ParamSpec" },
+          "description": "Parameter schema; every param is tagged with a `source` (SPEC.md §4.1)."
+        },
+        "block_type": {
+          "type": "string",
+          "description": "Which registered block renders proposals for this action."
+        },
+        "mutates": {
+          "type": "boolean",
+          "description": "Forces dry-run and explicit confirmation (SPEC.md §7.2)."
+        },
+        "authz_key": {
+          "type": "string",
+          "description": "Opaque permission key handed to the app's authorization resolver (SPEC.md §9.3)."
+        },
+        "display": {
+          "description": "Human-facing presentation for launchers and palettes (SPEC.md §4.3, non-normative). The agent never reads it. Absent (or null) means the action has no palette presence.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/DisplayDef" }]
+        }
+      }
+    },
+    "ParamSpec": {
+      "title": "ParamSpec",
+      "description": "One parameter of an action.",
+      "type": "object",
+      "required": ["name", "type", "source", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Parameter name." },
+        "description": {
+          "type": "string",
+          "description": "Model-facing description (utterance params only). Absent means an empty string."
+        },
+        "type": { "$ref": "#/$defs/ValueType", "description": "Value type." },
+        "source": { "$ref": "#/$defs/ParamSource", "description": "Where the value comes from." },
+        "required": { "type": "boolean", "description": "Whether the param must be present." }
+      }
+    },
+    "ParamSource": {
+      "title": "ParamSource",
+      "description": "Where a parameter's value comes from (SPEC.md §4.1). `context`: filled by the framework from the app context snapshot; never writable by the model. `utterance`: emitted by the model and validated against the schema.",
+      "type": "string",
+      "enum": ["context", "utterance"]
+    },
+    "ValueType": {
+      "title": "ValueType",
+      "description": "Value type of a param or slot. Deliberately JSON-schema-lite; apps that need richer validation do it in their handler. A simple type is a string; a fixed set of strings is the object `{\"string_enum\": [...]}`.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["string", "integer", "number", "boolean", "json"],
+          "description": "`string`: a UTF-8 string. `integer`: a whole number. `number`: any JSON number. `boolean`: a boolean. `json`: any JSON value; the app validates its shape in its handler."
+        },
+        {
+          "type": "object",
+          "required": ["string_enum"],
+          "additionalProperties": false,
+          "properties": {
+            "string_enum": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "One of a fixed set of strings: the allowed values."
+            }
+          }
+        }
+      ]
+    },
+    "DisplayDef": {
+      "title": "DisplayDef",
+      "description": "How an action presents to humans in a command palette or launcher (SPEC.md §4.3) — the discoverability counterpart of the model-facing `description`. The two texts legitimately diverge and are kept separate on purpose.",
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short imperative label (\"Generate onboarding brief\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "One-line human description of the outcome. Absent means an empty string."
+        },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra match surface for palette search beyond the title's words."
+        },
+        "group": {
+          "type": ["string", "null"],
+          "description": "Optional grouping key (lifecycle stage, feature area); apps define the vocabulary and ordering."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Free-form badges the app renders (e.g. \"ai\" for LLM-backed actions)."
+        }
+      }
+    }
+  }
+}

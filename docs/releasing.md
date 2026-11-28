@@ -19,6 +19,31 @@ push the branch, and push the tag. The tag push is the trigger — answering
 `N` keeps everything local (`git push origin v0.2.0` later publishes). The
 script aborts before committing if the tag already exists.
 
+## The schema baseline
+
+Before `set-version.sh`, on the same branch:
+
+```sh
+scripts/snapshot-schemas.sh
+git add spec/baseline && git commit -m "chore(spec): schema baseline for v0.2.0"
+```
+
+`spec/baseline/` holds the JSON Schemas as the last release had them;
+`crates/cleverhans-core/tests/spec_schema_growth.rs` fails on any change
+against it that is not additive (SPEC.md §13), unless
+`spec/baseline/breaks.json` accepts the break with a reason. The script
+copies the current `spec/schemas/` and `spec/webhook/schemas/` over the
+baseline and resets `breaks.json` to `[]` — the breaks accepted since the
+last release ship in this one. Commit before `set-version.sh`, which stages
+only the manifests, so the tag carries the new baseline.
+
+Nothing enforces this step, and forgetting it fails nothing: the check
+keeps comparing with the older release, so it still catches a break to
+anything that release had, and the accepted breaks stay listed. What it
+cannot see is a break to something added since — an optional field added
+in this release and removed in the next would pass. So take the baseline
+every release.
+
 ## What the `semver` gate enforces
 
 - The tag is strict semver (`v1.2.3`, `v1.2.3-rc.1`, `v1.2.3-beta.2+build`);
